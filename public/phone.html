@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <meta name="theme-color" content="#0d0a2b" />
+    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" />
+    <title>MMD i telefonen</title>
+    <!--
+      The patient app (/app/) in a phone, for showing MMD full screen on a
+      computer. The phone fills the height of the window and floats on a quiet
+      Hälsa+ (MyMedicalData) background. The app runs for real inside it, with
+      the same login as the admin console. F: full screen, R: reload the app.
+    -->
+    <style>
+      :root {
+        --bg: #181144;
+        --bg-deep: #0b0930;
+        --bar: #140e3a;
+        --cyan: #03d4d1;
+        --lavender: #b6a7ff;
+        --orange: #ffa22a;
+        --text: #ffffff;
+        --muted: #b9b5d6;
+        /* The phone's screen in CSS pixels, as on a 6.1-inch phone, and its frame. */
+        --screen-w: 393px;
+        --screen-h: 852px;
+        --bezel: 13px;
+        --status-h: 54px;
+        --home-h: 26px;
+        color-scheme: dark;
+        font-family: Quicksand, system-ui, -apple-system, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg-deep);
+        color: var(--text);
+      }
+
+      /* --- Background: deep indigo, soft glows, faint metro lines --- */
+
+      .backdrop {
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(1200px 800px at 15% 10%, rgba(182, 167, 255, 0.16), transparent 60%),
+          radial-gradient(1000px 700px at 85% 90%, rgba(3, 212, 209, 0.13), transparent 60%),
+          radial-gradient(900px 600px at 90% 15%, rgba(255, 162, 42, 0.06), transparent 60%),
+          linear-gradient(160deg, var(--bg) 0%, var(--bg-deep) 70%);
+      }
+
+      .backdrop::after {
+        /* A very faint dot grid, so the surface has some texture. */
+        content: '';
+        position: absolute;
+        inset: 0;
+        background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+        background-size: 28px 28px;
+        mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
+      }
+
+      .lines {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0.17;
+      }
+
+      /* --- Brand, bottom note and controls --- */
+
+      .brand {
+        position: fixed;
+        top: clamp(20px, 4vh, 44px);
+        left: clamp(20px, 4vw, 56px);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        user-select: none;
+      }
+
+      .brand .name {
+        font-size: clamp(26px, 2.6vw, 40px);
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        line-height: 1;
+      }
+
+      .brand .name span {
+        color: var(--cyan);
+      }
+
+      .brand .by {
+        font-size: clamp(12px, 0.9vw, 14px);
+        font-weight: 600;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--lavender);
+        opacity: 0.85;
+      }
+
+      .tagline {
+        position: fixed;
+        left: clamp(20px, 4vw, 56px);
+        bottom: clamp(20px, 4vh, 44px);
+        max-width: 26ch;
+        font-size: clamp(14px, 1.2vw, 18px);
+        font-weight: 500;
+        line-height: 1.45;
+        color: var(--muted);
+        user-select: none;
+      }
+
+      .tagline strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .controls {
+        position: fixed;
+        right: clamp(16px, 3vw, 40px);
+        bottom: clamp(16px, 3vh, 36px);
+        display: flex;
+        gap: 8px;
+        transition: opacity 0.4s ease;
+      }
+
+      body.idle .controls {
+        opacity: 0;
+      }
+
+      .controls button {
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 999px;
+        padding: 7px 14px;
+        cursor: pointer;
+      }
+
+      .controls button:hover {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      .controls button:focus-visible {
+        outline: 2px solid var(--cyan);
+        outline-offset: 2px;
+      }
+
+      kbd {
+        font: inherit;
+        opacity: 0.6;
+        margin-left: 6px;
+      }
+
+      /* --- The phone --- */
+
+      .stage {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+      }
+
+      .device {
+        position: relative;
+        width: calc(var(--screen-w) + 2 * var(--bezel));
+        height: calc(var(--screen-h) + 2 * var(--bezel));
+        padding: var(--bezel);
+        border-radius: 64px;
+        background: linear-gradient(145deg, #3a3a44, #121216 45%, #2b2b33);
+        box-shadow:
+          0 0 0 1.5px #5d5d68 inset,
+          0 0 0 4px #0b0b0e inset,
+          0 50px 120px rgba(0, 0, 0, 0.55),
+          0 18px 40px rgba(5, 3, 30, 0.6),
+          0 0 0 1px rgba(255, 255, 255, 0.04);
+        transform-origin: center;
+        /* Scaled to the window by the script below. */
+        transform: scale(var(--scale, 1));
+      }
+
+      @media (prefers-reduced-motion: no-preference) {
+        .device {
+          animation: float 9s ease-in-out infinite;
+        }
+        @keyframes float {
+          0%,
+          100% {
+            transform: translateY(0) scale(var(--scale, 1));
+          }
+          50% {
+            transform: translateY(calc(-6px * var(--scale, 1))) scale(var(--scale, 1));
+          }
+        }
+      }
+
+      /* Side buttons. */
+      .device::before,
+      .device::after {
+        content: '';
+        position: absolute;
+        width: 4px;
+        border-radius: 2px;
+        background: linear-gradient(90deg, #4a4a54, #1d1d22);
+      }
+      .device::before {
+        left: -3px;
+        top: 180px;
+        height: 64px;
+        box-shadow: 0 84px 0 #2a2a31;
+      }
+      .device::after {
+        right: -3px;
+        top: 230px;
+        height: 100px;
+      }
+
+      .screen {
+        position: relative;
+        width: var(--screen-w);
+        height: var(--screen-h);
+        border-radius: 52px;
+        overflow: hidden;
+        background: var(--bg);
+        display: flex;
+        flex-direction: column;
+        isolation: isolate;
+      }
+
+      .status {
+        flex: 0 0 var(--status-h);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 30px 0 46px;
+        background: var(--bg);
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+      }
+
+      .status .icons {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .island {
+        position: absolute;
+        top: 11px;
+        left: 50%;
+        width: 124px;
+        height: 36px;
+        margin-left: -62px;
+        border-radius: 20px;
+        background: #000;
+        z-index: 2;
+      }
+
+      iframe {
+        flex: 1 1 auto;
+        width: 100%;
+        border: 0;
+        display: block;
+        background: var(--bg);
+      }
+
+      .home {
+        flex: 0 0 var(--home-h);
+        background: var(--bar);
+        display: grid;
+        place-items: center;
+      }
+
+      .home span {
+        width: 134px;
+        height: 5px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.85);
+      }
+
+      /* Narrow windows: no room beside the phone for the text. */
+      @media (max-aspect-ratio: 4/3) {
+        .tagline {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="backdrop" aria-hidden="true">
+      <!-- Faint metro lines: the plan is drawn as a metro map in the app. -->
+      <svg class="lines" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+        <g fill="none" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M-40 760 C 220 760, 300 620, 520 620 S 820 700, 1000 560 S 1340 360, 1660 380" stroke="#03d4d1" />
+          <path d="M-40 860 C 260 860, 380 760, 600 760 S 900 820, 1120 700 S 1420 560, 1660 600" stroke="#b6a7ff" />
+          <path d="M120 -40 C 160 200, 300 300, 300 460 S 220 760, 340 1040" stroke="#ffa22a" />
+          <path d="M1480 -40 C 1440 180, 1300 260, 1300 420 S 1400 740, 1300 1040" stroke="#b6a7ff" />
+        </g>
+        <g fill="#0b0930" stroke-width="5">
+          <circle cx="520" cy="620" r="11" stroke="#03d4d1" />
+          <circle cx="1000" cy="560" r="11" stroke="#03d4d1" />
+          <circle cx="600" cy="760" r="11" stroke="#b6a7ff" />
+          <circle cx="1120" cy="700" r="11" stroke="#b6a7ff" />
+          <circle cx="300" cy="460" r="11" stroke="#ffa22a" />
+          <circle cx="1300" cy="420" r="11" stroke="#b6a7ff" />
+        </g>
+      </svg>
+    </div>
+
+    <div class="brand" aria-label="Hälsa+ by MyMedicalData">
+      <div class="name">Hälsa<span>+</span></div>
+      <div class="by">MyMedicalData</div>
+    </div>
+
+    <p class="tagline">
+      <strong>Din vårdplan som en tunnelbanekarta.</strong> Från vården via PDHC, rakt in i telefonen, och dina värden tillbaka.
+    </p>
+
+    <main class="stage">
+      <div class="device" id="device">
+        <div class="screen">
+          <div class="island" aria-hidden="true"></div>
+          <div class="status" aria-hidden="true">
+            <span id="clock">9:41</span>
+            <span class="icons">
+              <svg width="18" height="12" viewBox="0 0 18 12" fill="#fff"><rect x="0" y="8" width="3" height="4" rx="1" /><rect x="5" y="5.5" width="3" height="6.5" rx="1" /><rect x="10" y="3" width="3" height="9" rx="1" /><rect x="15" y="0" width="3" height="12" rx="1" /></svg>
+              <svg width="16" height="12" viewBox="0 0 16 12" fill="#fff"><path d="M8 2.3c2.4 0 4.6.9 6.2 2.5l1.2-1.2C13.4 1.6 10.8.6 8 .6S2.6 1.6.6 3.6l1.2 1.2C3.4 3.2 5.6 2.3 8 2.3zm0 3.4c1.5 0 2.9.6 3.9 1.6l1.2-1.2C11.8 4.8 10 4 8 4S4.2 4.8 2.9 6.1l1.2 1.2C5.1 6.3 6.5 5.7 8 5.7zm0 3.3c.6 0 1.2.2 1.6.7L8 11.4 6.4 9.7c.4-.5 1-.7 1.6-.7z" /></svg>
+              <svg width="27" height="13" viewBox="0 0 27 13"><rect x="0.5" y="0.5" width="23" height="12" rx="3.5" fill="none" stroke="rgba(255,255,255,.5)" /><rect x="2" y="2" width="17" height="9" rx="2" fill="#fff" /><path d="M25 4.5v4c.8-.3 1.3-1.1 1.3-2s-.5-1.7-1.3-2z" fill="rgba(255,255,255,.5)" /></svg>
+            </span>
+          </div>
+          <iframe id="app" src="/app/" title="MMD, patientappen" allow="clipboard-write"></iframe>
+          <div class="home" aria-hidden="true"><span></span></div>
+        </div>
+      </div>
+    </main>
+
+    <div class="controls">
+      <button type="button" id="reload">Ladda om appen<kbd>R</kbd></button>
+      <button type="button" id="fullscreen">Helskärm<kbd>F</kbd></button>
+    </div>
+
+    <script>
+      // Fit the phone to the height of the window (and never wider than it).
+      const device = document.getElementById('device');
+      const fit = () => {
+        const margin = Math.max(16, Math.min(40, window.innerHeight * 0.035));
+        const scale = Math.min(
+          (window.innerHeight - 2 * margin) / device.offsetHeight,
+          (window.innerWidth - 2 * margin) / device.offsetWidth,
+        );
+        device.style.setProperty('--scale', String(Math.max(0.3, scale)));
+      };
+      window.addEventListener('resize', fit);
+      fit();
+
+      // The clock in the status bar.
+      const clock = document.getElementById('clock');
+      const tick = () => {
+        clock.textContent = new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+      };
+      tick();
+      setInterval(tick, 10_000);
+
+      // Full screen and reload, by button or key.
+      const frame = document.getElementById('app');
+      const toggleFullscreen = () => {
+        if (document.fullscreenElement) void document.exitFullscreen();
+        else void document.documentElement.requestFullscreen?.();
+      };
+      const reload = () => {
+        frame.src = frame.src;
+      };
+      document.getElementById('fullscreen').addEventListener('click', toggleFullscreen);
+      document.getElementById('reload').addEventListener('click', reload);
+      window.addEventListener('keydown', (event) => {
+        if (event.metaKey || event.ctrlKey || event.altKey) return;
+        if (event.key === 'f' || event.key === 'F') toggleFullscreen();
+        if (event.key === 'r' || event.key === 'R') reload();
+      });
+
+      // The buttons fade out when the mouse rests, so they are not in the picture.
+      let idle;
+      const wake = () => {
+        document.body.classList.remove('idle');
+        clearTimeout(idle);
+        idle = setTimeout(() => document.body.classList.add('idle'), 2500);
+      };
+      window.addEventListener('mousemove', wake);
+      wake();
+    </script>
+  </body>
+</html>

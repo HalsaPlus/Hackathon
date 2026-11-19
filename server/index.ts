@@ -58,6 +58,12 @@ app.get('/sw.js', (_req, res) => {
 });
 app.use('/icons', express.static(path.join(pwaDir, 'icons'), { maxAge: '1d' }));
 
+// The patient app in a phone, for showing it full screen on a computer. Only a
+// shell around an iframe of /app/, which still needs the login.
+app.get(['/phone', '/phone.html'], (_req, res) => {
+  res.set('Cache-Control', 'no-cache').sendFile(path.join(pwaDir, 'phone.html'));
+});
+
 // --- Login -----------------------------------------------------------------
 // Everything below this line requires a signed-in session.
 
