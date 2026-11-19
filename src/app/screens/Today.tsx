@@ -1,4 +1,5 @@
 import type { ScreenProps } from '../App.tsx';
+import { cameFrom } from '../halsa.ts';
 import { CheckIcon, ChatIcon, MmdMark } from '../icons.tsx';
 import {
   activeRequests,
@@ -107,7 +108,7 @@ export function TodayScreen({ view, today }: ScreenProps) {
           </h2>
           <p className="muted small" style={{ margin: '4px 0 0' }}>
             {fromHealth
-              ? `${fromHealth.i.lane.activity.title} came in from Health at ${formatClock(fromHealth.obs[0].recordedAt)}.`
+              ? `${fromHealth.i.lane.activity.title} came in from ${cameFrom(fromHealth.obs)} at ${formatClock(fromHealth.obs[0].recordedAt)}.`
               : items.length
                 ? 'One stop at a time. You decide when.'
                 : 'Nothing planned for today.'}
@@ -136,7 +137,7 @@ export function TodayScreen({ view, today }: ScreenProps) {
                       <span className="muted small">
                         {lane.planTitle} ·{' '}
                         {stop.performedAt
-                          ? `done ${formatClock(stop.performedAt)}${obs.some((o) => o.device) ? ', from Health' : ''}`
+                          ? `done ${formatClock(stop.performedAt)}${obs.some((o) => o.device) ? `, from ${cameFrom(obs)}` : ''}`
                           : 'to do today'}
                       </span>
                     </span>

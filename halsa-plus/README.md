@@ -151,6 +151,31 @@ Den genererade datan är **deterministisk**. Samma dag får samma värden vid va
 
 API:t svarar då på `https://<mmd-tjänsten>/halsa-plus/api/v1/…`. Fler token kan skapas i tjänstens Shell med `cd halsa-plus && npm run token:create -- …`.
 
+## Patientappen i MMD läser Hälsa+
+
+MMD:s patientapp (`/app/`) hämtar värden från Hälsa+ för en patient som har en Hälsa+-länk. Koden finns i `server/halsa-link.ts`, `shared/halsa.ts` och `src/app/halsa.ts`.
+
+- **Som en riktig integration:** MMD läser genom Hälsa+-API:t med patientens egen bearer-token, aldrig direkt ur Hälsa+-databasen.
+- **Token:** finns bara på servern. Den skickas aldrig till webbläsaren och loggas aldrig.
+- **Andrea:** hennes GUID i PDHC och i Hälsa+ är samma, så `HALSA_ANDREA_TOKEN` räcker. Samma värde används av Hälsa+ och av MMD.
+- **Andra patienter:** får en rad i MMD:s tabell `halsa_links`.
+- **Patienter utan länk:** behåller simuleringen i `src/app/healthkit.ts`.
+- **Var Hälsa+ finns:** `HALSA_PLUS_URL`. Standard är Hälsa+ i samma tjänst, `http://127.0.0.1:$PORT/halsa-plus/api/v1`. Sätt den bara om Hälsa+ körs någon annanstans.
+- **Koppling:** PDHC-begrepp mappas på concept GUID eller exakt begreppsnamn:
+
+  | PDHC-begrepp | Hälsa+ |
+  | --- | --- |
+  | `CGM` | `glucose` |
+  | `sleep-duration` | `sleep`, minuter omräknat till timmar med 2 decimaler |
+  | `systolic-blood-pressure` / `diastolic-blood-pressure` | `blood-pressure` |
+  | `anxiety` | `anxiety` |
+  | `stress` | `stress` |
+  | `weight` | `bmi.weight` |
+
+- **`B-glucos` (blodsocker från fingerstick):** hämtas inte från Hälsa+.
+- **Värden ändras aldrig:** inget klipps eller filtreras mot planens intervall.
+- **Demoklockan:** `?asOf=2026-11-25T08:00:00Z` i appens adress flyttar Hälsa+-värdena. Planen följer den riktiga klockan.
+
 **Fristående (valfritt).** Skapa en egen Web Service:
 
 | Inställning | Värde |

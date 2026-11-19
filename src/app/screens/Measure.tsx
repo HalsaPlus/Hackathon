@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
+import { halsaDevice } from '../../../shared/halsa.ts';
 import type { ObservationView, ReportResult, Transaction } from '../../../shared/types.ts';
 import { call } from '../../api.ts';
 import type { ScreenProps } from '../App.tsx';
+import { halsaReading, prefilledValue, useStopHalsa, writeRatingToHalsa } from '../halsa.ts';
 import { isRating, simulate, simulationFor, SIMULATED_DEVICE } from '../healthkit.ts';
 import { CheckIcon, HeartIcon } from '../icons.tsx';
 import { DAY, formatClock, formatLong, observationsFor, planColor, planDay, stopState } from '../model.ts';
@@ -9,6 +11,8 @@ import { DAY, formatClock, formatLong, observationsFor, planColor, planDay, stop
 // Step 6: the patient reports a stop. Values a phone reads from Health are
 // simulated; ratings use a slider; anything else is typed. On send, MMD stores
 // the values with the stamp and passes them on to PDHC.
+// For a patient linked to Hälsa+, what the plan asks for is read from Hälsa+
+// instead (see ../halsa.ts), and ratings are written back to Hälsa+ as well.
 
 interface Props extends ScreenProps {
   requestGuid: string;
@@ -79,6 +83,8 @@ export function MeasureScreen({ view, today, refresh, patientGuid, requestGuid, 
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<ReportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [halsaNote, setHalsaNote] = useState<string | null>(null);
+  const halsa = useStopHalsa(patientGuid, transactions, stop?.dueAt);
 
   const simulated = useMemo(() => {
     const out: Record<string, string> = {};
@@ -105,8 +111,7 @@ export function MeasureScreen({ view, today, refresh, patientGuid, requestGuid, 
   const existing = observationsFor(view, request.guid, activity.key, stop.index);
   const due = Date.parse(stop.dueAt);
 
-  const valueOf = (t: Transaction) =>
-    values[t.name] ?? simulated[t.name] ?? (isRating(t.name, t.rangeMin, t.rangeMax) ? '3' : '');
+  const valueOf = (t: Transaction) => values[t.name] ?? prefilledValue(t, halsaReading(t, halsa), simulated[t.name]);
 
   const send = async () => {
     setSending(true);
@@ -116,15 +121,30 @@ export function MeasureScreen({ view, today, refresh, patientGuid, requestGuid, 
         serviceRequestGuid: request.guid,
         activityKey: activity.key,
         stopIndex: stop.index,
-        values: transactions.map((t) => ({
-          name: t.name,
-          value: valueOf(t),
-          unit: simulationFor(t.name)?.unit ?? t.unit,
-          device: simulated[t.name] !== undefined && values[t.name] === undefined ? SIMULATED_DEVICE : undefined,
-        })),
+        values: transactions.map((t) => {
+          const reading = halsaReading(t, halsa);
+          const fromHalsa = reading?.point && !reading.rating && values[t.name] === undefined ? reading.point : undefined;
+          return {
+            name: t.name,
+            value: valueOf(t),
+            unit: fromHalsa?.unit ?? simulationFor(t.name)?.unit ?? t.unit,
+            device: fromHalsa
+              ? halsaDevice(fromHalsa)
+              : !reading && simulated[t.name] !== undefined && values[t.name] === undefined
+                ? SIMULATED_DEVICE
+                : undefined,
+          };
+        }),
         note: note || undefined,
       });
       setResult(report);
+      // Ratings go to Hälsa+ too, so both keep the same history.
+      const ratings = transactions.flatMap((t) => {
+        const reading = halsaReading(t, halsa);
+        return reading?.rating ? [{ series: reading.series, value: valueOf(t) }] : [];
+      });
+      const failed = (await Promise.all(ratings.map((r) => writeRatingToHalsa(patientGuid, r.series, r.value)))).find(Boolean);
+      setHalsaNote(failed ? `Sent to the care team, but not saved in Hälsa+: ${failed}` : null);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Sending failed.');
@@ -153,7 +173,14 @@ export function MeasureScreen({ view, today, refresh, patientGuid, requestGuid, 
       {activity.description && <p className="muted" style={{ margin: 0 }}>{activity.description}</p>}
 
       {result ? (
-        <Receipt observations={result.observations} planTitle={planTitle} message={result.reportMessage} />
+        <>
+          <Receipt observations={result.observations} planTitle={planTitle} message={result.reportMessage} />
+          {halsaNote && (
+            <p className="error" role="alert">
+              {halsaNote}
+            </p>
+          )}
+        </>
       ) : existing.length > 0 || stop.performedAt ? (
         existing.length > 0 ? (
           <Receipt observations={existing} planTitle={planTitle} />
@@ -170,11 +197,14 @@ export function MeasureScreen({ view, today, refresh, patientGuid, requestGuid, 
         </section>
       ) : (
         <>
+          {halsa.status === 'error' && <p className="muted small" style={{ margin: 0 }}>Hälsa+: {halsa.message}</p>}
           {transactions.map((t) => {
             const sim = simulationFor(t.name);
-            const rating = !sim && isRating(t.name, t.rangeMin, t.rangeMax);
+            const reading = halsaReading(t, halsa);
+            const rating = !sim && (isRating(t.name, t.rangeMin, t.rangeMax) || !!reading?.rating);
             const id = `value-${seedOf(t.name, 0)}`;
-            if (sim) {
+            // From Hälsa+ without a value there: typed, like any other value.
+            if (sim && (!reading || reading.loading || reading.point)) {
               return (
                 <section key={t.name} className="card" aria-labelledby={id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -186,16 +216,22 @@ export function MeasureScreen({ view, today, refresh, patientGuid, requestGuid, 
                     )}
                   </div>
                   <div className="big-value">
-                    {valueOf(t)} <small>{sim.unit}</small>
+                    {valueOf(t) || '…'} <small>{reading?.point?.unit ?? sim.unit}</small>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <span className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <HeartIcon />
-                      From Health · simulated in the demo
+                      {!reading
+                        ? 'From Health · simulated in the demo'
+                        : reading.point
+                          ? `From ${halsaDevice(reading.point)}${reading.point.status === 'preliminary' ? ' · preliminary' : ''}`
+                          : 'Reading from Hälsa+ …'}
                     </span>
-                    <button type="button" className="btn ghost" style={{ minHeight: 34 }} onClick={() => setSeedBump(seedBump + 1)}>
-                      Read again
-                    </button>
+                    {!reading && (
+                      <button type="button" className="btn ghost" style={{ minHeight: 34 }} onClick={() => setSeedBump(seedBump + 1)}>
+                        Read again
+                      </button>
+                    )}
                   </div>
                 </section>
               );
@@ -208,7 +244,7 @@ export function MeasureScreen({ view, today, refresh, patientGuid, requestGuid, 
                       {t.name.replace(/\s*\(0\s*[–-]\s*10\)/, '')}
                     </label>
                     <span style={{ fontSize: 30, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                      {valueOf(t)}
+                      {valueOf(t) || '–'}
                       <span className="muted" style={{ fontSize: 14 }}>
                         {' '}
                         /10
