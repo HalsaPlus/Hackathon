@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { OBSERVATION_TYPES } from './synthetic/dataset.ts';
 
 // SQLite through Node's built-in driver, in the same style as the MMD app's
 // server/db.ts. The file is halsa-plus/.data/halsa-plus.sqlite (git-ignored)
@@ -12,6 +13,8 @@ import { DatabaseSync } from 'node:sqlite';
 // process, so tests can run several patients' databases and restarts.
 
 export const DEFAULT_DATABASE_PATH = path.resolve(import.meta.dirname, '..', '.data', 'halsa-plus.sqlite');
+
+const TYPE_LIST = OBSERVATION_TYPES.map((t) => `'${t}'`).join(', ');
 
 const SCHEMA = `
   PRAGMA journal_mode = WAL;
@@ -62,7 +65,7 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS observations (
     patient_guid        TEXT NOT NULL REFERENCES patients(guid) ON DELETE CASCADE,
     id                  TEXT NOT NULL,
-    type                TEXT NOT NULL CHECK (type IN ('blood-pressure', 'glucose', 'sleep', 'anxiety', 'stress', 'bmi', 'crp')),
+    type                TEXT NOT NULL CHECK (type IN (${TYPE_LIST})),
     source              TEXT NOT NULL CHECK (source IN ('generated', 'patient-entered', 'external-lab')),
     source_type         TEXT NOT NULL CHECK (source_type IN ('device', 'patient-reported', 'external-lab')),
     device_id           TEXT REFERENCES devices(id),
@@ -103,9 +106,39 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS seed_state (
     patient_guid TEXT PRIMARY KEY REFERENCES patients(guid) ON DELETE CASCADE,
     seeded_until INTEGER NOT NULL,
+    data_version INTEGER NOT NULL DEFAULT 1,
     updated_at   TEXT NOT NULL
   );
 `;
+
+/**
+ * Brings a database made by an earlier version up to date. The observation
+ * types are in a CHECK constraint, which SQLite can only change by copying
+ * the table; every row is kept as it is.
+ */
+function migrate(db: DatabaseSync) {
+  const table = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'observations'").get() as { sql: string } | undefined;
+  if (table && !OBSERVATION_TYPES.every((t) => table.sql.includes(`'${t}'`))) {
+    const create = /CREATE TABLE IF NOT EXISTS observations \([\s\S]*?\n {2}\);/.exec(SCHEMA)![0].replace('IF NOT EXISTS observations', 'observations_new');
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec('BEGIN');
+    try {
+      db.exec(create);
+      db.exec('INSERT INTO observations_new SELECT * FROM observations');
+      db.exec('DROP TABLE observations');
+      db.exec('ALTER TABLE observations_new RENAME TO observations');
+      db.exec(SCHEMA); // the indexes
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    } finally {
+      db.exec('PRAGMA foreign_keys = ON');
+    }
+  }
+  const columns = (db.prepare('PRAGMA table_info(seed_state)').all() as { name: string }[]).map((c) => c.name);
+  if (!columns.includes('data_version')) db.exec('ALTER TABLE seed_state ADD COLUMN data_version INTEGER NOT NULL DEFAULT 1');
+}
 
 type Param = string | number | null;
 
@@ -136,6 +169,7 @@ export function openDatabase(file: string = process.env.HALSA_DATABASE_PATH || D
   if (file !== ':memory:') mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec(SCHEMA);
+  migrate(db);
   return {
     db,
     all: <T>(sql: string, values: Record<string, unknown> = {}) => db.prepare(sql).all(params(values)) as unknown as T[],

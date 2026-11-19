@@ -7,6 +7,12 @@ import { ANDREA, ANDREA_DEVICES, buildDataset, dataWindow, type Entry } from './
 // generator gives the same values every time, so a restart only adds the
 // days that are new in the moving window. What she entered herself is never
 // touched.
+//
+// DATA_VERSION goes up when the generator itself changes (version 2: the
+// self-ratings are 1–7, and steps, energy, mood and depression are new). An
+// older database then gets its generated rows replaced once.
+
+export const DATA_VERSION = 2;
 
 export function seedAndrea(database: Database, startDate: string) {
   const window = dataWindow(startDate);
@@ -30,27 +36,36 @@ export function seedAndrea(database: Database, startDate: string) {
     }
     for (const d of ANDREA_DEVICES) {
       database.run(
-        `INSERT OR IGNORE INTO devices (id, patient_guid, type, name, source, types_json, since, created_at)
-         VALUES (:id, :guid, :type, :name, :source, :types, :since, :at)`,
+        `INSERT INTO devices (id, patient_guid, type, name, source, types_json, since, created_at)
+         VALUES (:id, :guid, :type, :name, :source, :types, :since, :at)
+         ON CONFLICT (id) DO UPDATE SET types_json = excluded.types_json`,
         { id: d.id, guid: ANDREA.guid, type: d.type, name: d.name, source: d.source, types: d.types, since: d.since, at },
       );
     }
   });
 
-  const state = database.get<{ seeded_until: number }>('SELECT seeded_until FROM seed_state WHERE patient_guid = :guid', { guid: ANDREA.guid });
-  if (state && state.seeded_until >= window.end) return { inserted: 0 };
+  const state = database.get<{ seeded_until: number; data_version: number }>(
+    'SELECT seeded_until, data_version FROM seed_state WHERE patient_guid = :guid',
+    { guid: ANDREA.guid },
+  );
+  const outdated = !!state && state.data_version < DATA_VERSION;
+  if (state && !outdated && state.seeded_until >= window.end) return { inserted: 0 };
 
   const { entries } = buildDataset(startDate);
   let inserted = 0;
   database.transaction(() => {
+    // Only what the generator made; entered values and lab results stay.
+    if (outdated) database.run(`DELETE FROM observations WHERE patient_guid = :guid AND source = 'generated'`, { guid: ANDREA.guid });
     const insert = database.db.prepare(INSERT_OBSERVATION.replace('INSERT', 'INSERT OR IGNORE'));
     for (const entry of entries) {
       inserted += Number(insert.run(observationRow(ANDREA.guid, entry, entry.observation.type === 'crp' ? 'external-lab' : 'generated', at)).changes);
     }
     database.run(
-      `INSERT INTO seed_state (patient_guid, seeded_until, updated_at) VALUES (:guid, :until, :at)
-       ON CONFLICT (patient_guid) DO UPDATE SET seeded_until = MAX(seeded_until, excluded.seeded_until), updated_at = excluded.updated_at`,
-      { guid: ANDREA.guid, until: window.end, at },
+      `INSERT INTO seed_state (patient_guid, seeded_until, data_version, updated_at) VALUES (:guid, :until, :version, :at)
+       ON CONFLICT (patient_guid) DO UPDATE SET
+         seeded_until = CASE WHEN :outdated = 1 THEN excluded.seeded_until ELSE MAX(seeded_until, excluded.seeded_until) END,
+         data_version = excluded.data_version, updated_at = excluded.updated_at`,
+      { guid: ANDREA.guid, until: window.end, version: DATA_VERSION, outdated, at },
     );
   });
   return { inserted };

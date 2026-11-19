@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { buildDataset } from './synthetic/dataset.ts';
+import { buildDataset, isRatingType } from './synthetic/dataset.ts';
 import { ER_MS, DISCHARGE_MS, generateHistory } from './synthetic/history.ts';
 
 // SYNTHETIC TEST DATA ONLY.
@@ -40,7 +40,7 @@ test('the window runs from 2026-03-01 (Paris) to 28 days after the start date', 
 test('every type is present, and nothing is measured during the hospital stay', () => {
   const d = buildDataset('2026-11-19');
   const types = new Set(d.entries.map((e) => e.observation.type));
-  assert.deepEqual([...types].sort(), ['anxiety', 'blood-pressure', 'bmi', 'crp', 'glucose', 'sleep', 'stress']);
+  assert.deepEqual([...types].sort(), ['anxiety', 'blood-pressure', 'bmi', 'crp', 'depression', 'energy', 'glucose', 'mood', 'sleep', 'steps', 'stress']);
   const during = d.entries.filter((e) => {
     const o = e.observation;
     const start = Date.parse(o.effectivePeriod?.start ?? o.effectiveDateTime ?? '');
@@ -84,13 +84,48 @@ test('CRP: one fictional external lab in Paris, roughly monthly, none during the
   assert.deepEqual([below?.comparator, below?.value], ['<', 5]);
 });
 
-test('self-ratings are integers 0–10 and BMI matches weight and height', () => {
+test('self-ratings are integers 1–7 and BMI matches weight and height', () => {
   for (const { observation: o } of buildDataset('2026-11-19').entries) {
-    if (o.type === 'anxiety' || o.type === 'stress') assert.ok(Number.isInteger(o.value) && o.value! >= 0 && o.value! <= 10);
+    if (isRatingType(o.type)) {
+      assert.ok(Number.isInteger(o.value) && o.value! >= 1 && o.value! <= 7, `${o.id}: ${o.value}`);
+      assert.equal(o.unit, '1–7');
+    }
     if (o.type === 'bmi') {
       const kg = o.components!.find((c) => c.code === 'weight')!.value;
       const cm = o.components!.find((c) => c.code === 'height')!.value;
       assert.equal(o.value, Math.round((kg / (cm / 100) ** 2) * 10) / 10);
     }
   }
+});
+
+test('steps daily, energy/mood/stress/anxiety most evenings, depression about weekly', () => {
+  const d = buildDataset('2026-11-19');
+  const real = d.entries.filter((e) => e.at <= Date.parse('2026-11-19T12:00:00Z'));
+  const count = (type: string, from: string) => real.filter((e) => e.observation.type === type && e.at >= Date.parse(from)).length;
+  // The 8 weeks before the demo: 56 days.
+  for (const type of ['steps', 'energy', 'mood', 'stress', 'anxiety']) {
+    const n = count(type, '2026-09-24T00:00:00Z');
+    assert.ok(n >= 35 && n <= 56, `${type}: ${n} in 56 days`);
+  }
+  const depression = count('depression', '2026-09-24T00:00:00Z');
+  assert.ok(depression >= 4 && depression <= 8, `depression: ${depression} in 8 weeks`);
+  // Some missed days and weeks.
+  assert.ok(count('energy', '2026-03-01T00:00:00Z') < count('steps', '2026-03-01T00:00:00Z'));
+  for (const e of real.filter((x) => x.observation.type === 'steps')) {
+    assert.ok(Number.isInteger(e.observation.value) && e.observation.value! > 0 && e.observation.unit === 'steps');
+    assert.equal(e.observation.deviceId, '9aadb89f-7c71-5a8a-bb38-f32fceb26615', 'from the smartwatch');
+  }
+});
+
+test('the ratings and steps follow the scenario: worse before the emergency visit than in early spring', () => {
+  const d = buildDataset('2026-11-19');
+  const mean = (type: string, from: string, to: string) => {
+    const values = d.entries
+      .filter((e) => e.observation.type === type && e.at >= Date.parse(from) && e.at < Date.parse(to))
+      .map((e) => e.observation.value!);
+    return values.reduce((a, b) => a + b, 0) / values.length;
+  };
+  assert.ok(mean('stress', '2026-08-01', '2026-08-24') > mean('stress', '2026-03-01', '2026-04-01') + 1.5);
+  assert.ok(mean('energy', '2026-08-01', '2026-08-24') < mean('energy', '2026-03-01', '2026-04-01') - 1.5);
+  assert.ok(mean('steps', '2026-08-01', '2026-08-24') < mean('steps', '2026-03-01', '2026-04-01') - 2000);
 });

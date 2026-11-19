@@ -55,23 +55,63 @@
       "status": "final"
     },
     {
-      "id": "anxiety-20261114T174300Z",
-      "type": "anxiety",
-      "sourceType": "patient-reported",
-      "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
-      "effectiveDateTime": "2026-11-14T17:43:00Z",
-      "value": 1,
-      "unit": "0–10",
+      "id": "steps-20261115T223000Z",
+      "type": "steps",
+      "sourceType": "device",
+      "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
+      "effectiveDateTime": "2026-11-15T22:30:00Z",
+      "value": 12803,
+      "unit": "steps",
       "status": "final"
     },
     {
-      "id": "stress-20261114T174300Z",
+      "id": "energy-20261115T211200Z",
+      "type": "energy",
+      "sourceType": "patient-reported",
+      "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+      "effectiveDateTime": "2026-11-15T21:12:00Z",
+      "value": 4,
+      "unit": "1–7",
+      "status": "final"
+    },
+    {
+      "id": "mood-20261115T211200Z",
+      "type": "mood",
+      "sourceType": "patient-reported",
+      "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+      "effectiveDateTime": "2026-11-15T21:12:00Z",
+      "value": 5,
+      "unit": "1–7",
+      "status": "final"
+    },
+    {
+      "id": "stress-20261114T195600Z",
       "type": "stress",
       "sourceType": "patient-reported",
       "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
-      "effectiveDateTime": "2026-11-14T17:43:00Z",
-      "value": 5,
-      "unit": "0–10",
+      "effectiveDateTime": "2026-11-14T19:56:00Z",
+      "value": 2,
+      "unit": "1–7",
+      "status": "final"
+    },
+    {
+      "id": "anxiety-20261115T211200Z",
+      "type": "anxiety",
+      "sourceType": "patient-reported",
+      "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+      "effectiveDateTime": "2026-11-15T21:12:00Z",
+      "value": 2,
+      "unit": "1–7",
+      "status": "final"
+    },
+    {
+      "id": "depression-20261115T211200Z",
+      "type": "depression",
+      "sourceType": "patient-reported",
+      "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+      "effectiveDateTime": "2026-11-15T21:12:00Z",
+      "value": 3,
+      "unit": "1–7",
       "status": "final"
     },
     {

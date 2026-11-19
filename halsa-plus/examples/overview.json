@@ -1,0 +1,370 @@
+{
+  "asOf": "2026-11-15T22:59:00Z",
+  "window": {
+    "from": "2026-11-01T22:59:00Z",
+    "to": "2026-11-15T22:59:00Z",
+    "days": 14
+  },
+  "demoRanges": true,
+  "synthetic": true,
+  "healthScore": 77,
+  "categories": [
+    {
+      "id": "lungs",
+      "name": "Lungs",
+      "score": null,
+      "available": 0,
+      "total": 2,
+      "valuesInWindow": 0,
+      "valuesInRange": 0,
+      "measures": [
+        {
+          "id": "oxygen-saturation",
+          "name": "Oxygen saturation",
+          "type": null,
+          "available": false,
+          "demoRanges": [],
+          "valuesInWindow": 0,
+          "valuesInRange": 0,
+          "latest": null
+        },
+        {
+          "id": "peak-flow",
+          "name": "Peak flow",
+          "type": null,
+          "available": false,
+          "demoRanges": [],
+          "valuesInWindow": 0,
+          "valuesInRange": 0,
+          "latest": null
+        }
+      ]
+    },
+    {
+      "id": "liver",
+      "name": "Liver",
+      "score": null,
+      "available": 0,
+      "total": 2,
+      "valuesInWindow": 0,
+      "valuesInRange": 0,
+      "measures": [
+        {
+          "id": "alt",
+          "name": "ALT",
+          "type": null,
+          "available": false,
+          "demoRanges": [],
+          "valuesInWindow": 0,
+          "valuesInRange": 0,
+          "latest": null
+        },
+        {
+          "id": "ggt",
+          "name": "GGT",
+          "type": null,
+          "available": false,
+          "demoRanges": [],
+          "valuesInWindow": 0,
+          "valuesInRange": 0,
+          "latest": null
+        }
+      ]
+    },
+    {
+      "id": "hormones",
+      "name": "Hormones",
+      "score": 33,
+      "available": 1,
+      "total": 1,
+      "valuesInWindow": 1340,
+      "valuesInRange": 446,
+      "measures": [
+        {
+          "id": "glucose",
+          "name": "Glucose (CGM)",
+          "type": "glucose",
+          "available": true,
+          "demoRanges": [
+            {
+              "low": 3.9,
+              "high": 10,
+              "unit": "mmol/L"
+            }
+          ],
+          "valuesInWindow": 1340,
+          "valuesInRange": 446,
+          "latest": {
+            "id": "glucose-20261115T225200Z",
+            "type": "glucose",
+            "sourceType": "device",
+            "deviceId": "6f9f647e-3f38-5bb4-a897-75ebf3d250b7",
+            "effectiveDateTime": "2026-11-15T22:52:00Z",
+            "value": 11,
+            "unit": "mmol/L",
+            "status": "final"
+          }
+        }
+      ]
+    },
+    {
+      "id": "heart",
+      "name": "Heart",
+      "score": 100,
+      "available": 1,
+      "total": 1,
+      "valuesInWindow": 24,
+      "valuesInRange": 24,
+      "measures": [
+        {
+          "id": "blood-pressure",
+          "name": "Blood pressure",
+          "type": "blood-pressure",
+          "available": true,
+          "demoRanges": [
+            {
+              "component": "systolic",
+              "low": 90,
+              "high": 130,
+              "unit": "mmHg"
+            },
+            {
+              "component": "diastolic",
+              "low": 60,
+              "high": 85,
+              "unit": "mmHg"
+            }
+          ],
+          "valuesInWindow": 24,
+          "valuesInRange": 24,
+          "latest": {
+            "id": "blood-pressure-20261115T200600Z",
+            "type": "blood-pressure",
+            "sourceType": "device",
+            "deviceId": "487a0ac7-adec-5ab4-9a07-451e80585c1e",
+            "effectiveDateTime": "2026-11-15T20:06:00Z",
+            "components": [
+              {
+                "code": "systolic",
+                "value": 115,
+                "unit": "mmHg"
+              },
+              {
+                "code": "diastolic",
+                "value": 76,
+                "unit": "mmHg"
+              }
+            ],
+            "status": "final"
+          }
+        }
+      ]
+    },
+    {
+      "id": "urinary-tract",
+      "name": "Urinary tract",
+      "score": null,
+      "available": 0,
+      "total": 2,
+      "valuesInWindow": 0,
+      "valuesInRange": 0,
+      "measures": [
+        {
+          "id": "creatinine",
+          "name": "Creatinine",
+          "type": null,
+          "available": false,
+          "demoRanges": [],
+          "valuesInWindow": 0,
+          "valuesInRange": 0,
+          "latest": null
+        },
+        {
+          "id": "urine-test",
+          "name": "Urine test",
+          "type": null,
+          "available": false,
+          "demoRanges": [],
+          "valuesInWindow": 0,
+          "valuesInRange": 0,
+          "latest": null
+        }
+      ]
+    },
+    {
+      "id": "mental-health",
+      "name": "Mental health",
+      "score": 97,
+      "available": 6,
+      "total": 6,
+      "valuesInWindow": 65,
+      "valuesInRange": 63,
+      "measures": [
+        {
+          "id": "sleep",
+          "name": "Sleep",
+          "type": "sleep",
+          "available": true,
+          "demoRanges": [
+            {
+              "component": "sleep-duration",
+              "low": 360,
+              "high": 540,
+              "unit": "min"
+            }
+          ],
+          "valuesInWindow": 14,
+          "valuesInRange": 14,
+          "latest": {
+            "id": "sleep-20261115T062500Z",
+            "type": "sleep",
+            "sourceType": "device",
+            "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
+            "effectivePeriod": {
+              "start": "2026-11-14T22:44:00Z",
+              "end": "2026-11-15T06:25:00Z"
+            },
+            "components": [
+              {
+                "code": "sleep-duration",
+                "value": 441,
+                "unit": "min"
+              },
+              {
+                "code": "awakenings",
+                "value": 3,
+                "unit": "count"
+              }
+            ],
+            "status": "final"
+          }
+        },
+        {
+          "id": "energy",
+          "name": "Energy",
+          "type": "energy",
+          "available": true,
+          "demoRanges": [
+            {
+              "low": 4,
+              "high": 7,
+              "unit": "1–7"
+            }
+          ],
+          "valuesInWindow": 13,
+          "valuesInRange": 13,
+          "latest": {
+            "id": "energy-20261115T211200Z",
+            "type": "energy",
+            "sourceType": "patient-reported",
+            "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+            "effectiveDateTime": "2026-11-15T21:12:00Z",
+            "value": 4,
+            "unit": "1–7",
+            "status": "final"
+          }
+        },
+        {
+          "id": "mood",
+          "name": "Mood",
+          "type": "mood",
+          "available": true,
+          "demoRanges": [
+            {
+              "low": 4,
+              "high": 7,
+              "unit": "1–7"
+            }
+          ],
+          "valuesInWindow": 13,
+          "valuesInRange": 12,
+          "latest": {
+            "id": "mood-20261115T211200Z",
+            "type": "mood",
+            "sourceType": "patient-reported",
+            "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+            "effectiveDateTime": "2026-11-15T21:12:00Z",
+            "value": 5,
+            "unit": "1–7",
+            "status": "final"
+          }
+        },
+        {
+          "id": "stress",
+          "name": "Stress",
+          "type": "stress",
+          "available": true,
+          "demoRanges": [
+            {
+              "low": 1,
+              "high": 4,
+              "unit": "1–7"
+            }
+          ],
+          "valuesInWindow": 11,
+          "valuesInRange": 11,
+          "latest": {
+            "id": "stress-20261114T195600Z",
+            "type": "stress",
+            "sourceType": "patient-reported",
+            "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+            "effectiveDateTime": "2026-11-14T19:56:00Z",
+            "value": 2,
+            "unit": "1–7",
+            "status": "final"
+          }
+        },
+        {
+          "id": "anxiety",
+          "name": "Anxiety",
+          "type": "anxiety",
+          "available": true,
+          "demoRanges": [
+            {
+              "low": 1,
+              "high": 4,
+              "unit": "1–7"
+            }
+          ],
+          "valuesInWindow": 13,
+          "valuesInRange": 12,
+          "latest": {
+            "id": "anxiety-20261115T211200Z",
+            "type": "anxiety",
+            "sourceType": "patient-reported",
+            "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+            "effectiveDateTime": "2026-11-15T21:12:00Z",
+            "value": 2,
+            "unit": "1–7",
+            "status": "final"
+          }
+        },
+        {
+          "id": "depression",
+          "name": "Depression",
+          "type": "depression",
+          "available": true,
+          "demoRanges": [
+            {
+              "low": 1,
+              "high": 4,
+              "unit": "1–7"
+            }
+          ],
+          "valuesInWindow": 1,
+          "valuesInRange": 1,
+          "latest": {
+            "id": "depression-20261115T211200Z",
+            "type": "depression",
+            "sourceType": "patient-reported",
+            "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+            "effectiveDateTime": "2026-11-15T21:12:00Z",
+            "value": 3,
+            "unit": "1–7",
+            "status": "final"
+          }
+        }
+      ]
+    }
+  ]
+}

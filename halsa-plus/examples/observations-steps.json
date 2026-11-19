@@ -1,0 +1,46 @@
+{
+  "asOf": "2026-11-15T22:59:00Z",
+  "items": [
+    {
+      "id": "steps-20261112T223000Z",
+      "type": "steps",
+      "sourceType": "device",
+      "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
+      "effectiveDateTime": "2026-11-12T22:30:00Z",
+      "value": 11318,
+      "unit": "steps",
+      "status": "final"
+    },
+    {
+      "id": "steps-20261113T223000Z",
+      "type": "steps",
+      "sourceType": "device",
+      "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
+      "effectiveDateTime": "2026-11-13T22:30:00Z",
+      "value": 7879,
+      "unit": "steps",
+      "status": "final"
+    },
+    {
+      "id": "steps-20261114T223000Z",
+      "type": "steps",
+      "sourceType": "device",
+      "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
+      "effectiveDateTime": "2026-11-14T22:30:00Z",
+      "value": 12212,
+      "unit": "steps",
+      "status": "final"
+    },
+    {
+      "id": "steps-20261115T223000Z",
+      "type": "steps",
+      "sourceType": "device",
+      "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
+      "effectiveDateTime": "2026-11-15T22:30:00Z",
+      "value": 12803,
+      "unit": "steps",
+      "status": "final"
+    }
+  ],
+  "nextCursor": null
+}

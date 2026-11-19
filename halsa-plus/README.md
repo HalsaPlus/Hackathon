@@ -4,7 +4,9 @@
 
 En liten backend som låtsas vara Hälsa+, patientappen. Data sparas i SQLite. Just nu finns en patient, Andrea, men fler kan läggas till utan kodändringar. Andrea har:
 - hennes egna mätvärden från flera enheter;
-- hennes självskattningar i appen;
+- hennes självskattningar i appen (1–7);
+- en kort vaccinationshistorik;
+- en hälsoöversikt med poäng, som Hälsa+-appens hemskärm (demointervall);
 - CRP-svar från ett externt labb som hon går till på eget initiativ (påhittat för demon).
 
 GUI:t anropar API:t. MMD och vården får samma data som FHIR.
@@ -77,9 +79,11 @@ SQLite via `node:sqlite`, i samma stil som MMD:s `server/db.ts` (se [`src/db.ts`
 | `devices` | patientens enheter och Hälsa+-appen |
 | `observations` | alla mätvärden. `source` är `generated`, `patient-entered` eller `external-lab`. |
 | `consent_decisions` | varje samtyckesbeslut. Tabellen fylls bara på; triggers stoppar ändringar och radering. |
-| `seed_state` | hur långt den genererade datan är inläst |
+| `seed_state` | hur långt den genererade datan är inläst, och med vilken version av generatorn (`data_version`) |
 
 **Andrea läses in vid första start**, med guid `28a29239-6424-48e7-a123-9d9e863670b8` (samma som hennes patient-GUID i PDHC), personnummer `200207252388` (visas som `20020725-2388`) och födelsedatum 2002-07-25. Hennes genererade data läses in idempotent: samma id och samma värden varje gång. En omstart lägger bara till de nya dagarna i fönstret, och det hon själv har matat in rörs aldrig.
+
+**När generatorn ändras** höjs `DATA_VERSION` i [`src/seed.ts`](src/seed.ts). Vid nästa start byts då Andreas genererade rader ut en gång. Det gäller också databasen på Render-disken. Det hon själv har matat in och labbsvaren ligger kvar som de är, även gamla skattningar på 0–10. Version 2 gör om skattningarna till 1–7 och lägger till `steps`, `energy`, `mood` och `depression`. En äldre databas byggs då också om så att de nya typerna får plats; alla rader följer med.
 
 ## API i korthet
 
@@ -90,12 +94,14 @@ SQLite via `node:sqlite`, i samma stil som MMD:s `server/db.ts` (se [`src/db.ts`
 | `GET /api/v1/devices` | Enheterna och appen, med senaste synk (≤ `asOf`) |
 | `GET /api/v1/observations` | Tidsserier, äldst först. Filter: `type`, `from`, `to`, `device`, `asOf`, `limit` (högst 5000) och `cursor`. `format=fhir` ger en FHIR R4-Bundle. |
 | `GET /api/v1/observations/latest` | Senaste värdet per typ |
-| `POST /api/v1/observations` | Patienten matar in ett värde: `anxiety`, `stress`, `glucose`, `blood-pressure`, `bmi` (vikt) eller `sleep`. Värdet sparas. |
+| `POST /api/v1/observations` | Patienten matar in ett värde: en skattning 1–7 (`energy`, `mood`, `stress`, `anxiety`, `depression`), `glucose`, `blood-pressure`, `bmi` (vikt) eller `sleep`. Värdet sparas. |
+| `GET /api/v1/vaccinations` | Andreas vaccinationer. Syntetiska, med påhittade mottagningar. |
+| `GET /api/v1/overview` | Hälsoöversikten: sex kategorier med poäng och en total "Health score", mot **demointervall** (se nedan) |
 | `GET /api/v1/requests` | Förfrågningar från vården. Platshållare, listan är tom. |
 | `POST /api/v1/requests/{id}/consent` | Godkänn eller avböj (`accept`/`decline`). Beslutet sparas, och det senaste gäller. |
 | `GET /api/v1/requests/{id}/consent` | Alla beslut för en förfrågan, äldst först |
 
-**Typer:** `blood-pressure`, `glucose`, `sleep`, `anxiety`, `stress`, `bmi` och `crp`.
+**Typer:** `blood-pressure`, `glucose`, `sleep`, `steps`, `energy`, `mood`, `stress`, `anxiety`, `depression`, `bmi` och `crp`. API-typen heter `anxiety`; i appen står det alltid "Anxiety".
 
 ### Demoklockan
 - Data finns från **2026-03-01** (Paris-tid) till **28 dagar efter den dag servern startade**. Fönstret räknas om vid varje start.
@@ -118,12 +124,14 @@ Den genererade datan är **deterministisk**. Samma dag får samma värden vid va
 | `blood-pressure` | Blodtrycksmätare | **Återanvänt** till och med 2026-11-15. Därefter några gånger i veckan, på morgonen. |
 | `bmi` (+ `weight`, `height`) | Badrumsvåg, på söndagar | Vikten är **återanvänd** till och med 2026-11-15 och fortsätter sedan med samma modell. Längden är fast **168 cm**. BMI är vikt delat med längd i kvadrat, utan kategori. |
 | `sleep` | Smartklocka, varje natt | Ny: läggtid, vakentid, sovminuter och uppvaknanden. Några nätter saknas, när klockan inte bars. |
-| `anxiety`, `stress` | Hälsa+-appen, självskattning 0–10 per kväll | Ny, med missade dagar. Det är **inget validerat instrument**. |
+| `steps` | Smartklocka, steg per dag | Ny: dagens summa vid sista synken kl. 23:30. Färre under nedgången, några dagar utan klocka. |
+| `energy`, `mood`, `stress`, `anxiety` | Hälsa+-appen, självskattning **1–7** per kväll | Ny, med missade kvällar och ibland bara en del av frågorna. Det är **inget validerat instrument**. |
+| `depression` | Hälsa+-appen, självskattning **1–7**, söndagar | Ny, med missade veckor. **Inget validerat instrument.** |
 | `crp` | Externt labb (Laboratoire Belvasse, Paris, påhittat) | Se nedan. |
 
 **Scenariot:**
 - Andrea har bott i Paris sedan februari, och någon stress finns från början.
-- Från mitten av april blir sömnen sämre, självskattningarna högre och de missade dagarna fler. CGM-luckorna växer och glukosen stiger fram till akutbesöket 2026-08-24 klockan 19:30 (19,3 mmol/L klockan 19:22).
+- Från mitten av april blir sömnen sämre, stegen färre, stress, oro och nedstämdhet högre, energi och humör lägre, och de missade dagarna fler. CGM-luckorna växer och glukosen stiger fram till akutbesöket 2026-08-24 klockan 19:30 (19,3 mmol/L klockan 19:22).
 - Under vårdtiden fram till utskrivningen 2026-08-27 klockan 15:00 finns inga värden. Utskrivningstiden är ett antagande.
 - Efter utskrivningen förbättras det gradvis och ojämnt.
 
@@ -137,7 +145,33 @@ Den genererade datan är **deterministisk**. Samma dag får samma värden vid va
 - **Värden:** labbet svarar `<5` mg/L (`comparator: "<"`) när värdet ligger under dess gräns, och annars heltal (6, 7, 8). Värden med `comparator` tas aldrig bort.
 - **Sjukhusets labbsvar ingår inte:** Hôpital Valmorins labbsvar från akutbesöket finns bara i sjukhusets dokument (repot Hackaton 2026) och är inte med i Hälsa+-serien.
 
-**Inga tolkningar:** API:t har inga poäng, inga flaggor för högt, lågt eller normalt, inga färger, inga referensintervall och ingen statistik (medel, min, max). Ett test kontrollerar det.
+**Självskattningarnas skala (1–7):**
+- `stress`, `anxiety`, `depression`: 1 = not at all … 7 = very much.
+- `energy`, `mood`: 1 = very low … 7 = very high.
+
+**Vaccinationer:** en kort syntetisk historik: barnvaccinationsprogrammet sammanfattat i några rader, HPV i skolan, influensa 2025, covid-19-booster och hepatit A och B före flytten till Paris. Alla mottagningar är påhittade.
+
+## Hälsoöversikten (`GET /api/v1/overview`)
+
+> **Intervallen nedan är demovärden, påhittade för demon.** De är inga kliniska referensintervall. Det här är en demo av framtida möjligheter, inte en reglerad produkt.
+
+| Kategori | Typer | Demointervall |
+| --- | --- | --- |
+| Lungs | inga data (oxygen saturation, peak flow) | – |
+| Liver | inga data (ALT, GGT) | – |
+| Hormones | `glucose` | 3,9–10,0 mmol/L |
+| Heart | `blood-pressure` | systoliskt 90–130 och diastoliskt 60–85 mmHg |
+| Urinary tract | inga data (creatinine, urine test) | – |
+| Mental health | `sleep`, `energy`, `mood`, `stress`, `anxiety`, `depression` | sömn 6–9 h; energi och humör 4–7; stress, oro och nedstämdhet 1–4 |
+
+- **Poäng per kategori:** andelen (%) av patientens värden de 14 dagarna före `asOf` som ligger inom intervallet. Alla värden räknas, alltså varje CGM-värde.
+- **Blodtryck:** en mätning räknas inom intervallet bara om både det systoliska och det diastoliska är det.
+- **Utan värden i fönstret:** `score: null`.
+- **Health score:** medelvärdet av kategorierna som har poäng.
+- **Detaljer per kategori:** "available/total" och senaste värdet per mått.
+- **Mått utan källa:** listas med `type: null`, så att appen kan visa "No data available".
+
+**Tolkning bara i översikten:** `/observations`, `/observations/latest` och FHIR-formatet har fortfarande inga flaggor, färger, referensintervall eller statistik. Ett test kontrollerar det. Poäng och demointervall finns bara i `/overview`.
 
 ## Render
 

@@ -1,0 +1,104 @@
+// Andrea's vaccinations, so the app looks used. SYNTHETIC TEST DATA ONLY:
+// the dates follow the Swedish programmes roughly, and every clinic name is
+// made up.
+
+export interface Vaccination {
+  id: string;
+  vaccine: string;
+  /** What it protects against, in plain words. */
+  against: string;
+  date: string;
+  dose: string;
+  givenAt: string;
+}
+
+export const VACCINATIONS: Vaccination[] = [
+  {
+    id: 'vacc-childhood-infant',
+    vaccine: 'Childhood programme: DTaP-IPV-Hib-HepB',
+    against: 'Diphtheria, tetanus, whooping cough, polio, Hib and hepatitis B',
+    date: '2003-07-28',
+    dose: '3 doses (3, 5 and 12 months)',
+    givenAt: 'BVC Lindbacken (fictional)',
+  },
+  {
+    id: 'vacc-childhood-mmr-1',
+    vaccine: 'MMR',
+    against: 'Measles, mumps and rubella',
+    date: '2004-01-26',
+    dose: 'Dose 1 of 2',
+    givenAt: 'BVC Lindbacken (fictional)',
+  },
+  {
+    id: 'vacc-childhood-booster-5',
+    vaccine: 'DTaP-IPV booster',
+    against: 'Diphtheria, tetanus, whooping cough and polio',
+    date: '2007-09-03',
+    dose: 'Booster',
+    givenAt: 'BVC Lindbacken (fictional)',
+  },
+  {
+    id: 'vacc-childhood-mmr-2',
+    vaccine: 'MMR',
+    against: 'Measles, mumps and rubella',
+    date: '2009-10-12',
+    dose: 'Dose 2 of 2',
+    givenAt: 'Elevhälsan, Ekåsens skola (fictional)',
+  },
+  {
+    id: 'vacc-hpv',
+    vaccine: 'HPV',
+    against: 'Human papillomavirus',
+    date: '2013-04-15',
+    dose: '2 doses (autumn 2012 and spring 2013)',
+    givenAt: 'Elevhälsan, Ekåsens skola (fictional)',
+  },
+  {
+    id: 'vacc-dtap-teen',
+    vaccine: 'dTap booster',
+    against: 'Diphtheria, tetanus and whooping cough',
+    date: '2017-02-20',
+    dose: 'Booster',
+    givenAt: 'Elevhälsan, Ekåsens gymnasium (fictional)',
+  },
+  {
+    id: 'vacc-hepab-1',
+    vaccine: 'Hepatitis A and B',
+    against: 'Hepatitis A and B (before moving to Paris)',
+    date: '2025-11-10',
+    dose: 'Dose 1 of 3',
+    givenAt: 'Vaccinationsmottagningen Solvik (fictional)',
+  },
+  {
+    id: 'vacc-influenza-2025',
+    vaccine: 'Seasonal influenza 2025/26',
+    against: 'Influenza',
+    date: '2025-11-10',
+    dose: 'Single dose',
+    givenAt: 'Vaccinationsmottagningen Solvik (fictional)',
+  },
+  {
+    id: 'vacc-covid-booster',
+    vaccine: 'COVID-19 booster',
+    against: 'COVID-19',
+    date: '2025-11-24',
+    dose: 'Booster',
+    givenAt: 'Vaccinationsmottagningen Solvik (fictional)',
+  },
+  {
+    id: 'vacc-hepab-2',
+    vaccine: 'Hepatitis A and B',
+    against: 'Hepatitis A and B (before moving to Paris)',
+    date: '2025-12-10',
+    dose: 'Dose 2 of 3',
+    givenAt: 'Vaccinationsmottagningen Solvik (fictional)',
+  },
+  {
+    id: 'vacc-hepab-3',
+    vaccine: 'Hepatitis A and B',
+    against: 'Hepatitis A and B',
+    date: '2026-01-26',
+    dose: 'Dose 3 of 3',
+    givenAt: 'Vaccinationsmottagningen Solvik (fictional)',
+  },
+];

@@ -40,10 +40,11 @@
       "name": "Smartwatch (demo)",
       "source": "bluetooth",
       "types": [
-        "sleep"
+        "sleep",
+        "steps"
       ],
       "since": "2026-03-01",
-      "lastSyncAt": "2026-11-15T06:25:00Z"
+      "lastSyncAt": "2026-11-15T22:30:00Z"
     },
     {
       "id": "6416ebbc-5cba-5d4d-875b-381123d451ea",
@@ -51,15 +52,18 @@
       "name": "Hälsa+ app",
       "source": "manual-entry",
       "types": [
-        "anxiety",
+        "energy",
+        "mood",
         "stress",
+        "anxiety",
+        "depression",
         "blood-pressure",
         "glucose",
         "bmi",
         "sleep"
       ],
       "since": "2026-03-01",
-      "lastSyncAt": "2026-11-14T17:43:00Z"
+      "lastSyncAt": "2026-11-15T21:12:00Z"
     }
   ]
 }
