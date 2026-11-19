@@ -25,6 +25,14 @@ function insideFrame() {
   }
 }
 
+// The app inside the phone: marked so phone-frame.css can give it a phone's
+// slim scrollbar that stops above the tab bar.
+try {
+  if ((window.frameElement as HTMLElement | null)?.classList.contains('pf-app')) document.documentElement.classList.add('pf-inside');
+} catch {
+  // A frame from another origin: not ours.
+}
+
 const clock = () => new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
 function fit() {
