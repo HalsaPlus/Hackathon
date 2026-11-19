@@ -46,6 +46,11 @@ export function NewPlanScreen({ view, patientGuid, refresh, requestGuid }: Scree
           {formatShort(request.periodStart)} – {formatShort(request.periodEnd)}
           {followUp ? ` · follow-up ${formatShort(followUp.dueAt)}` : ''}
         </p>
+        {request.closed && (
+          <p className="error" role="status" style={{ margin: 0 }}>
+            The care team has closed this plan. It is no longer on your map.
+          </p>
+        )}
       </div>
 
       <section className="card" aria-labelledby="goals" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

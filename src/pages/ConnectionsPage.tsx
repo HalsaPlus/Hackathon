@@ -1,5 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
-import type { ConnectionView, InboundLogEntry } from '../../shared/types.ts';
+import type { ConnectionView, InboundLogEntry, TestReportResult } from '../../shared/types.ts';
 import { api, type ConnectionInput } from '../api.ts';
 import { ServiceSettingsCard } from '../components/ServiceSettingsCard.tsx';
 import { formatDateTime } from '../format.ts';
@@ -192,8 +192,27 @@ function ConnectionCard({
   onDeleted: () => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState<'test' | 'sync' | 'delete' | null>(null);
+  const [busy, setBusy] = useState<'test' | 'sync' | 'delete' | 'report' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [testReport, setTestReport] = useState<TestReportResult[] | null>(null);
+
+  const sendTestReport = async () => {
+    const ok = window.confirm(
+      `Send synthetic test observations to PDHC for every open request from "${connection.name}"?\n\n` +
+        'One set of values per activity goes to gateway.pdhc as if the patient had reported it, marked as test data. ' +
+        "The values are also saved in MMD and mark the stop as done in the patient's app.",
+    );
+    if (!ok) return;
+    setBusy('report');
+    setError(null);
+    try {
+      setTestReport(await api.sendTestReport(connection.id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sending the test observations failed.');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const run = async (kind: 'test' | 'sync') => {
     setBusy(kind);
@@ -286,6 +305,9 @@ function ConnectionCard({
             <button type="button" className="button secondary" onClick={() => void run('sync')} disabled={busy !== null}>
               {busy === 'sync' ? 'Fetching …' : 'Fetch requests'}
             </button>
+            <button type="button" className="button secondary" onClick={() => void sendTestReport()} disabled={busy !== null}>
+              {busy === 'report' ? 'Sending …' : 'Send test observations'}
+            </button>
             <button type="button" className="button subtle" onClick={() => setEditing(true)} disabled={busy !== null}>
               Edit
             </button>
@@ -293,9 +315,82 @@ function ConnectionCard({
               Remove
             </button>
           </div>
+
+          {testReport && <TestReportTable results={testReport} />}
         </>
       )}
     </article>
+  );
+}
+
+const REPORT_OUTCOMES: Record<TestReportResult['status'], { label: string; tone: string }> = {
+  sent: { label: 'Sent', tone: 'ok' },
+  demo: { label: 'Demo', tone: '' },
+  pending: { label: 'Pending', tone: '' },
+  failed: { label: 'Failed', tone: 'bad' },
+  skipped: { label: 'Skipped', tone: '' },
+};
+
+/** What the test button sent, per request and activity, and what PDHC answered. */
+function TestReportTable({ results }: { results: TestReportResult[] }) {
+  if (results.length === 0) {
+    return <p className="notice">No open requests from this connection, so nothing was sent.</p>;
+  }
+  const sent = results.filter((r) => r.status === 'sent').length;
+  return (
+    <section className="test-report" aria-label="Test observations sent">
+      <h3>
+        Test observations: {sent} of {results.length} {results.length === 1 ? 'activity' : 'activities'} sent
+      </h3>
+      <div className="table-scroll">
+        <table className="table">
+          <thead>
+            <tr>
+              <th scope="col">Request</th>
+              <th scope="col">Activity</th>
+              <th scope="col">Values</th>
+              <th scope="col">PDHC</th>
+            </tr>
+          </thead>
+          <tbody>
+            {results.map((r, i) => (
+              <tr key={`${r.serviceRequestGuid}-${i}`}>
+                <td>
+                  {r.patientName ?? 'Patient'} · {r.planTitle ?? 'Plan'}
+                  <br />
+                  <span className="mono small">{r.serviceRequestGuid}</span>
+                </td>
+                <td>
+                  {r.activity}
+                  {r.stopIndex !== null && r.stopDueAt && (
+                    <>
+                      <br />
+                      <span className="small muted">
+                        Stop {r.stopIndex + 1}, {formatDateTime(r.stopDueAt)}
+                      </span>
+                    </>
+                  )}
+                </td>
+                <td>
+                  {r.values.length === 0
+                    ? '–'
+                    : r.values.map((v) => (
+                        <div key={v.name}>
+                          {v.name}: <strong>{v.value}</strong> {v.unit ?? ''}
+                          {v.transactionGuid && <span className="mono small muted"> ({v.transactionGuid.slice(0, 8)}…)</span>}
+                        </div>
+                      ))}
+                </td>
+                <td>
+                  <span className={`pill ${REPORT_OUTCOMES[r.status].tone}`}>{REPORT_OUTCOMES[r.status].label}</span>
+                  <div className="small">{r.message}</div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

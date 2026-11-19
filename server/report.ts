@@ -1,6 +1,6 @@
 import type { ReportInput, ReportResult, ReportStatus, Transaction } from '../shared/types.ts';
 import { now } from './db.ts';
-import { reportToGateway } from './pdhc.ts';
+import { gatewayValue, reportToGateway } from './pdhc.ts';
 import {
   activityStops,
   gatewayUrlOf,
@@ -9,6 +9,7 @@ import {
   getObservations,
   getServiceRequestRow,
   insertObservation,
+  isClosed,
   setPerformed,
   setReportOutcome,
 } from './store.ts';
@@ -35,6 +36,7 @@ function clean(value: unknown, max: number) {
 export async function reportStop(patientGuid: string, input: ReportInput): Promise<ReportResult> {
   const request = getServiceRequestRow(clean(input.serviceRequestGuid, 100));
   if (!request || request.patient_guid !== patientGuid) throw new ReportError('The plan was not found.', 404);
+  if (isClosed(request)) throw new ReportError('This plan has been closed by the care team, so it no longer takes reports.', 409);
   const activity = getActivity(request.guid, clean(input.activityKey, 200));
   if (!activity) throw new ReportError('The activity was not found.', 404);
   const stops = activityStops(request.guid, activity.activity_key) ?? [];
@@ -51,12 +53,13 @@ export async function reportStop(patientGuid: string, input: ReportInput): Promi
       value: clean(v.value, 200),
       unit: clean(v.unit, 40) || known?.unit || null,
       transactionGuid: known?.transactionGuid ?? null,
+      responseType: known?.responseType,
       conceptGuid: known?.conceptGuid ?? null,
       device: clean(v.device, 80) || null,
     };
   });
   // An activity with nothing to measure is reported as simply done.
-  if (values.length === 0) values.push({ name: activity.title, value: 'done', unit: null, transactionGuid: null, conceptGuid: null, device: null });
+  if (values.length === 0) values.push({ name: activity.title, value: 'done', unit: null, transactionGuid: null, responseType: undefined, conceptGuid: null, device: null });
   if (values.some((v) => !v.value)) throw new ReportError('Every value needs to be filled in.');
 
   const recordedAt = now();
@@ -114,15 +117,17 @@ export async function reportStop(patientGuid: string, input: ReportInput): Promi
           report_payload: {
             observations: sendable.map((v) => ({
               transaction_guid: (v.transactionGuid ?? v.conceptGuid)!,
-              value: v.value,
+              value: gatewayValue(v.value, v.responseType),
               recorded_at: recordedAt,
               ...(note ? { notes: note } : {}),
             })),
           },
         });
         status = 'sent';
-        confirmed = answer.status === 'recorded';
-        message = confirmed ? 'Received by PDHC.' : `Sent. PDHC answered "${answer.status}".`;
+        confirmed = answer.received;
+        message = confirmed
+          ? `Received by PDHC${answer.receiptGuid ? ` (receipt ${answer.receiptGuid})` : ''}.`
+          : `Sent. PDHC answered "${answer.status}".`;
       } catch (error) {
         status = 'failed';
         message = error instanceof Error ? error.message : 'Sending to PDHC failed.';

@@ -10,6 +10,7 @@ import { fetchIpsFromHealthConnect } from './ips.ts';
 import { sendToCdr } from './messaging.ts';
 import { ReportError, reportStop } from './report.ts';
 import { getSettings, saveSettings, SettingsError, toSettingsView } from './settings.ts';
+import { sendTestReports } from './testreport.ts';
 import {
   activityStops,
   addMessage,
@@ -230,6 +231,17 @@ export function setupApi(app: Express) {
       res.json(toSettingsView(saveSettings(req.body)));
     } catch (error) {
       if (error instanceof SettingsError) return res.status(400).json({ error: error.message });
+      sendError(res, error);
+    }
+  });
+
+  /** Sends synthetic test observations to PDHC for every open request from this connection. */
+  app.post('/api/connections/:id/test-report', async (req, res) => {
+    const connection = getConnection(connectionId(req));
+    if (!connection) return res.status(404).json({ error: 'The connection does not exist.' });
+    try {
+      res.json(await sendTestReports(connection.id));
+    } catch (error) {
       sendError(res, error);
     }
   });

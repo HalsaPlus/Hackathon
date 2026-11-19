@@ -39,6 +39,8 @@ export interface Transaction {
   rangeMax?: number;
   expected?: string;
   unit?: string;
+  /** PDHC's response_type, e.g. "numeric". gateway.pdhc wants a JSON number for numeric values. */
+  responseType?: string;
 }
 
 export interface Goal {
@@ -86,6 +88,15 @@ export interface ServiceRequestView {
   updatedAt: string;
   ackStatus: string | null;
   hasGrantToken: boolean;
+  /** PDHC's own status for the request (sr_status, e.g. "active", "archived"); null when unknown. */
+  pdhcStatus: string | null;
+  /**
+   * True when PDHC has closed the request (archived, revoked, or is_open
+   * false). A closed request is not shown to the patient and takes no reports.
+   */
+  closed: boolean;
+  /** The patient's instantiated CarePlan in PDHC that the request was frozen from. */
+  carePlanGuid: string | null;
   /** When the patient opened the plan in the app; null = not yet. */
   seenAt: string | null;
   /** One request can carry several longitudinal plans (diabetes, reumatologi …). */
@@ -182,6 +193,20 @@ export interface ReportResult {
   observations: ObservationView[];
   reportStatus: ReportStatus;
   reportMessage: string;
+}
+
+/** One activity's test values from the admin console, and what PDHC answered. */
+export interface TestReportResult {
+  serviceRequestGuid: string;
+  patientName: string | null;
+  planTitle: string | null;
+  activity: string;
+  /** Which stop on the line the values were reported for (0-based) and when it was due. */
+  stopIndex: number | null;
+  stopDueAt: string | null;
+  values: { name: string; value: string; unit: string | null; transactionGuid: string | null }[];
+  status: ReportStatus | 'skipped';
+  message: string;
 }
 
 export interface PatientSummary {

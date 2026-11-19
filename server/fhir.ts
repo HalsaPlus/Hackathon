@@ -234,6 +234,7 @@ export function parseTransactions(value: unknown): Transaction[] {
       rangeMax: number(item.range_max),
       expected: text(item.expected_value),
       unit: text(item.unit_name) ?? text(item.concept_unit_name) ?? text(item.unit),
+      responseType: text(item.response_type),
     });
   }
   return result;
@@ -272,6 +273,7 @@ export function parseActivity(raw: unknown, position: number, contained: Map<str
   const timing =
     timingFromFhir(detail?.scheduledTiming) ??
     timingFromFhir(raw.timingTiming) ??
+    timingFromFhir(raw.timing) ?? // care_plan.activities[] in /provider/download
     timingFromPdhcFields(raw) ??
     (planned ? timingFromOccurrence(planned) : undefined) ??
     (text(detail?.scheduledString) || text(raw.timingString) ? { kind: 'unscheduled' as const } : undefined) ??
@@ -367,6 +369,10 @@ export interface ParsedDelivery {
   providerOrgGuid: string | null;
   receiptToken: string | null;
   grantToken: string | null;
+  /** What PDHC says outside the FHIR resource (download only); null when not said. */
+  pdhcStatus: string | null;
+  isOpen: boolean | null;
+  carePlanGuid: string | null;
   /** Every care plan in the request; several when it covers several conditions. */
   carePlans: ParsedCarePlan[];
 }
@@ -414,6 +420,10 @@ export interface DeliveryContext {
   patientGuid?: string;
   contractGuid?: string;
   providerOrgGuid?: string;
+  /** sr_status, is_open and care_plan_guid from /provider/download. */
+  pdhcStatus?: string;
+  isOpen?: boolean;
+  carePlanGuid?: string;
 }
 
 /**
@@ -541,6 +551,9 @@ export function parseDelivery(resource: unknown, context: DeliveryContext = {}):
     providerOrgGuid: context.providerOrgGuid ?? tags.organisation_guid ?? null,
     receiptToken: context.receiptToken ?? tags.receipt_token ?? null,
     grantToken: context.grantToken ?? tags.grant_token ?? null,
+    pdhcStatus: context.pdhcStatus ?? null,
+    isOpen: context.isOpen ?? null,
+    carePlanGuid: context.carePlanGuid ?? null,
     carePlans,
   };
 }
