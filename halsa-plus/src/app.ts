@@ -12,7 +12,7 @@ import {
   type Dataset,
   type ObservationType,
   type StoredObservation,
-} from './data/dataset.ts';
+} from './synthetic/dataset.ts';
 import { toFhirBundle } from './fhir.ts';
 
 // The simulated Hälsa+ API. See openapi.yaml for the contract.

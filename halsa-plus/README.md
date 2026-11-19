@@ -78,7 +78,7 @@ Allt är **deterministiskt**. Samma dag får samma värden vid varje omstart.
 
 | Typ | Enhet (källa) | Ursprung |
 | --- | --- | --- |
-| `glucose` | CGM-sensor, var 15:e minut | **Återanvänt:** generatorn `scripts/build-device-data.mjs` från Hälsa+-demon (repot Halsa-plus-demo), kopierad till [`src/data/history.ts`](src/data/history.ts) med samma frö och scenario. Värdena till och med **2026-11-15** är identiska med originalet, vilket ett test kontrollerar med en kontrollsumma. Därefter genereras de i [`extension.ts`](src/data/extension.ts): sensorbyte var 14:e dag och en jämn nivå. |
+| `glucose` | CGM-sensor, var 15:e minut | **Återanvänt:** generatorn `scripts/build-device-data.mjs` från Hälsa+-demon (repot Halsa-plus-demo), kopierad till [`src/synthetic/history.ts`](src/synthetic/history.ts) med samma frö och scenario. Värdena till och med **2026-11-15** är identiska med originalet, vilket ett test kontrollerar med en kontrollsumma. Därefter genereras de i [`extension.ts`](src/synthetic/extension.ts): sensorbyte var 14:e dag och en jämn nivå. |
 | `blood-pressure` | Blodtrycksmätare | **Återanvänt** till och med 2026-11-15. Därefter några gånger i veckan, på morgonen. |
 | `bmi` (+ `weight`, `height`) | Badrumsvåg, på söndagar | Vikten är **återanvänd** till och med 2026-11-15 och fortsätter sedan med samma modell. Längden är fast **168 cm**. BMI är vikt delat med längd i kvadrat, utan kategori. |
 | `sleep` | Smartklocka, varje natt | Ny: läggtid, vakentid, sovminuter och uppvaknanden. Några nätter saknas, när klockan inte bars. |

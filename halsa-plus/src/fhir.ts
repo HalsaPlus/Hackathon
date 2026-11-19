@@ -3,7 +3,7 @@
 // sleep night use Hälsa+'s own demo codes; the ratings are not a validated
 // instrument. No interpretation and no reference ranges, as everywhere.
 
-import { DEVICES, PATIENT_ID, type Component, type StoredObservation } from './data/dataset.ts';
+import { DEVICES, PATIENT_ID, type Component, type StoredObservation } from './synthetic/dataset.ts';
 
 const LOINC = 'http://loinc.org';
 export const LOCAL = 'https://halsaplus.example/codes';

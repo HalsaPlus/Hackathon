@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { buildDataset } from './data/dataset.ts';
-import { ER_MS, DISCHARGE_MS, generateHistory } from './data/history.ts';
+import { buildDataset } from './synthetic/dataset.ts';
+import { ER_MS, DISCHARGE_MS, generateHistory } from './synthetic/history.ts';
 
 // SYNTHETIC TEST DATA ONLY.
 
