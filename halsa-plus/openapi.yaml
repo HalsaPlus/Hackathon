@@ -1,0 +1,529 @@
+openapi: 3.1.0
+info:
+  title: Hälsa+ demo API (simulated)
+  version: 0.1.0
+  summary: A simulated Hälsa+ backend with one synthetic patient, Andrea Lindqvist.
+  description: |
+    **ALL DATA IS SYNTHETIC TEST DATA.** Andrea Lindqvist is a fictional patient from the
+    Nordic Hackathon 2026 scenario. No real person is described.
+
+    The API serves Andrea's own measurements in Hälsa+, the patient app: values from her
+    devices, her self-ratings in the app, and lab results she has imported from her care
+    providers.
+
+    ## Rules for content
+    - **No clinical interpretation.** There are no scores, no high/low/normal flags, no
+      colours, no reference ranges and no thresholds. The API returns values, units, times,
+      devices and sources only.
+    - **No descriptive statistics** (mean, min, max). BMI is a plain calculation from weight
+      and height and carries no category.
+
+    ## Time window and the demo clock (`asOf`)
+    Data exists from **2026-03-01 00:00 Europe/Paris** to **28 days after the day the server
+    started**. The window moves with the date on every restart. Generation is deterministic,
+    so a given day has the same values on every restart.
+
+    Every endpoint that returns data takes **`asOf`** (ISO 8601 date-time). It works as a demo
+    clock:
+    - The API returns only what is available at `asOf`. For most types that is
+      `effectiveDateTime ≤ asOf`. For `sleep` it is `effectivePeriod.end ≤ asOf` (the night
+      is known when she wakes up). For `crp` it is `issued ≤ asOf` (the result is known when
+      the lab issues it).
+    - Without `asOf`, the server uses the env variable `DEMO_NOW` if it is set, and
+      otherwise the real current time. Without either, nothing from the future is returned.
+    - A GUI can "fast-forward" up to 28 days by sending a later `asOf`.
+    - **`status` tells simulated future values apart:** `final` means the time is at or
+      before the server's real current time. `preliminary` means the time is after it, so
+      the value can only be seen because `asOf` is in the future. A GUI should never show a
+      `preliminary` value as if it had already happened.
+    - `asOf` outside the window gives `400 asof_out_of_range`.
+
+    Every list response repeats the `asOf` it used.
+
+    ## Auth and CORS
+    - Every endpoint except `/api/v1/health` needs `Authorization: Bearer <token>`. The token
+      is the value of the env variable `HALSA_API_TOKEN`.
+    - Browsers may call the API from the origins listed in the env variable `CORS_ORIGINS`
+      (comma-separated).
+
+    ## Units
+    The JSON responses carry display units (`mmHg`, `mmol/L`, `kg/m²`). The FHIR format
+    (`format=fhir`) carries UCUM codes (`mm[Hg]`, `mmol/L`, `kg/m2`).
+servers:
+  - url: http://localhost:3002
+    description: Local (npm run dev)
+security:
+  - bearerAuth: []
+tags:
+  - name: system
+  - name: patient
+  - name: observations
+  - name: requests
+    description: Placeholder for the next step. Care-plan requests from MMD/PDHC and the patient's consent.
+paths:
+  /api/v1/health:
+    get:
+      tags: [system]
+      operationId: getHealth
+      summary: Liveness check (no auth)
+      security: []
+      responses:
+        '200':
+          description: The service is up.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+              examples:
+                ok: { externalValue: examples/health.json }
+
+  /api/v1/me:
+    get:
+      tags: [patient]
+      operationId: getMe
+      summary: Andrea's profile
+      responses:
+        '200':
+          description: The patient's profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Profile' }
+              examples:
+                andrea: { externalValue: examples/me.json }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/devices:
+    get:
+      tags: [patient]
+      operationId: listDevices
+      summary: Her devices and the app, with their last sync
+      description: |
+        `lastSyncAt` is the time of the device's latest observation at or before `asOf`. It is
+        `null` if the device has nothing yet at `asOf`. Lab results are not a device; their
+        source is in `Observation.performer`.
+      parameters:
+        - $ref: '#/components/parameters/asOf'
+      responses:
+        '200':
+          description: The devices.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceList' }
+              examples:
+                devices: { externalValue: examples/devices.json }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/observations:
+    get:
+      tags: [observations]
+      operationId: listObservations
+      summary: Time series of her observations, oldest first, paginated
+      description: |
+        The list is sorted by time, oldest first, so the newest item is last. Follow
+        `nextCursor` to get the next page; it is `null` on the last page.
+
+        With `format=fhir` the same selection is returned as a FHIR R4 `Bundle` (type
+        `searchset`) of `Observation` resources. That format is meant for the care side
+        (MMD/PDHC).
+      parameters:
+        - name: type
+          in: query
+          description: One type or a comma-separated list. All types if omitted.
+          schema: { type: string, example: 'glucose,blood-pressure' }
+        - name: from
+          in: query
+          description: Earliest time (inclusive). Default is the start of the data, 2026-03-01.
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          description: Latest time (inclusive). It is capped at `asOf`.
+          schema: { type: string, format: date-time }
+        - name: device
+          in: query
+          description: Only observations from this device id.
+          schema: { type: string }
+        - $ref: '#/components/parameters/asOf'
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 5000, default: 1000 }
+        - name: cursor
+          in: query
+          description: The `nextCursor` value from the previous page. Opaque.
+          schema: { type: string }
+        - name: format
+          in: query
+          schema: { type: string, enum: [json, fhir], default: json }
+      responses:
+        '200':
+          description: One page of observations.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObservationPage' }
+              examples:
+                glucose: { externalValue: examples/observations-glucose.json }
+                blood-pressure: { externalValue: examples/observations-blood-pressure.json }
+                bmi: { externalValue: examples/observations-bmi.json }
+                sleep: { externalValue: examples/observations-sleep.json }
+                self-ratings: { externalValue: examples/observations-self-ratings.json }
+                crp: { externalValue: examples/observations-crp.json }
+            application/fhir+json:
+              schema:
+                type: object
+                description: FHIR R4 Bundle (type searchset) of Observation resources. See the FhirMapping schema for the codes.
+              examples:
+                fhir: { externalValue: examples/observations-fhir.json }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/observations/latest:
+    get:
+      tags: [observations]
+      operationId: latestObservations
+      summary: The latest observation per type at `asOf`
+      description: One item per type that has an observation at or before `asOf`. A type with nothing yet is left out.
+      parameters:
+        - $ref: '#/components/parameters/asOf'
+        - name: type
+          in: query
+          description: One type or a comma-separated list. All types if omitted.
+          schema: { type: string }
+      responses:
+        '200':
+          description: The latest observation of each type.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObservationList' }
+              examples:
+                latest: { externalValue: examples/observations-latest.json }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/requests:
+    get:
+      tags: [requests]
+      operationId: listRequests
+      summary: Incoming care-plan requests (placeholder, returns an empty list for now)
+      responses:
+        '200':
+          description: The requests.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequestList' }
+              examples:
+                empty: { externalValue: examples/requests.json }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/requests/{id}/consent:
+    post:
+      tags: [requests]
+      operationId: decideConsent
+      summary: Andrea accepts or declines a request (placeholder)
+      description: Gives `404` until requests exist. Every decision will be logged, and a new decision does not overwrite an earlier one.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConsentInput' }
+            example: { decision: accept }
+      responses:
+        '200':
+          description: The decision is recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsentDecision' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: The value of the env variable HALSA_API_TOKEN.
+
+  parameters:
+    asOf:
+      name: asOf
+      in: query
+      description: |
+        Demo clock (ISO 8601 date-time). Only what is available at this time is returned.
+        Default: env `DEMO_NOW`, otherwise the real current time. Must lie within the data
+        window, otherwise `400 asof_out_of_range`.
+      schema: { type: string, format: date-time, example: '2026-11-15T23:59:00+01:00' }
+
+  responses:
+    BadRequest:
+      description: A parameter is invalid, for example `asof_out_of_range`, `invalid_type` or `invalid_cursor`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            asOf: { externalValue: examples/error-400.json }
+    Unauthorized:
+      description: The bearer token is missing or wrong.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Not found.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Health:
+      type: object
+      required: [status, service]
+      properties:
+        status: { const: ok }
+        service: { const: halsa-plus }
+        version: { type: string }
+
+    Profile:
+      type: object
+      required: [id, name, birthDate, identifier, synthetic]
+      properties:
+        id: { type: string, description: Stable id of Andrea's Hälsa+ account. }
+        name:
+          type: object
+          required: [given, family, text]
+          properties:
+            given: { type: array, items: { type: string } }
+            family: { type: string }
+            text: { type: string }
+        birthDate: { type: string, format: date }
+        gender: { type: string, enum: [female, male, other, unknown] }
+        identifier:
+          type: array
+          description: The Swedish personal identity number (Skatteverket test series).
+          items: { $ref: '#/components/schemas/Identifier' }
+        height:
+          $ref: '#/components/schemas/Quantity'
+          description: The fixed height that BMI is calculated from.
+        synthetic: { const: true }
+
+    Identifier:
+      type: object
+      required: [system, value]
+      properties:
+        system: { type: string, example: 'urn:oid:1.2.752.129.2.1.3.1' }
+        value: { type: string, example: '200207252388' }
+
+    DeviceList:
+      type: object
+      required: [asOf, items]
+      properties:
+        asOf: { type: string, format: date-time }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Device' }
+
+    Device:
+      type: object
+      required: [id, type, name, source, types, lastSyncAt]
+      properties:
+        id: { type: string }
+        type:
+          type: string
+          enum: [cgm-sensor, blood-pressure-monitor, scale, smartwatch, app]
+        name: { type: string, description: Display name (English, as in the original Hälsa+ demo). Generic and fictional, no brands. }
+        source:
+          type: string
+          enum: [bluetooth, manual-entry]
+          description: How the data reaches Hälsa+.
+        types:
+          type: array
+          description: The observation types this device produces.
+          items: { $ref: '#/components/schemas/ObservationType' }
+        since: { type: string, format: date, description: When Andrea started using the device. }
+        lastSyncAt: { type: [string, 'null'], format: date-time }
+
+    ObservationType:
+      type: string
+      enum: [blood-pressure, glucose, sleep, anxiety, stress, bmi, crp]
+
+    ObservationPage:
+      type: object
+      required: [asOf, items, nextCursor]
+      properties:
+        asOf: { type: string, format: date-time }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Observation' }
+        nextCursor: { type: [string, 'null'] }
+
+    ObservationList:
+      type: object
+      required: [asOf, items]
+      properties:
+        asOf: { type: string, format: date-time }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Observation' }
+
+    Observation:
+      type: object
+      description: |
+        One observation. Which fields are present depends on `type`:
+
+        | type | value / components | time | source |
+        |---|---|---|---|
+        | `glucose` | `value` mmol/L | `effectiveDateTime` | CGM sensor |
+        | `blood-pressure` | components `systolic`, `diastolic` (mmHg), optional `pulse` (/min) | `effectiveDateTime` | blood pressure monitor |
+        | `bmi` | `value` kg/m²; components `weight` (kg) and `height` (cm) it is calculated from | `effectiveDateTime` | scale |
+        | `sleep` | components `sleep-duration` (min), `awakenings` (count) | `effectivePeriod` = bedtime to wake time | smartwatch |
+        | `anxiety`, `stress` | `value` integer 0–10, unit `0–10` | `effectiveDateTime` = when she entered it | Hälsa+ app (patient-reported) |
+        | `crp` | `value` mg/L, optional `comparator` | `effectiveDateTime` = sample time, `issued` | lab at a care provider (`performer`) |
+
+        The self-ratings are Andrea's own 0–10 ratings in the app. They are **not** a validated
+        instrument.
+      required: [id, type, status, sourceType, deviceId]
+      properties:
+        id: { type: string, description: 'Stable across restarts, for example glucose-20260824T172200Z.' }
+        type: { $ref: '#/components/schemas/ObservationType' }
+        status:
+          type: string
+          enum: [final, preliminary]
+          description: '`preliminary` = a simulated future value, visible only because `asOf` is after the real current time.'
+        sourceType:
+          type: string
+          enum: [device, patient-reported, care-provider-lab]
+        deviceId: { type: [string, 'null'], description: '`null` for lab results.' }
+        performer:
+          $ref: '#/components/schemas/Performer'
+          description: Only for lab results. The care provider whose laboratory produced the result.
+        effectiveDateTime: { type: string, format: date-time }
+        effectivePeriod:
+          type: object
+          description: Only for `sleep`.
+          required: [start, end]
+          properties:
+            start: { type: string, format: date-time, description: Bedtime. }
+            end: { type: string, format: date-time, description: Wake time. }
+        issued: { type: string, format: date-time, description: Only for lab results. When the lab issued the result. }
+        value: { type: number }
+        comparator:
+          $ref: '#/components/schemas/Comparator'
+        unit: { type: string, description: Display unit of `value`. }
+        components:
+          type: array
+          items: { $ref: '#/components/schemas/Component' }
+
+    Component:
+      type: object
+      required: [code, value, unit]
+      properties:
+        code:
+          type: string
+          enum: [systolic, diastolic, pulse, weight, height, sleep-duration, awakenings]
+        value: { type: number }
+        comparator: { $ref: '#/components/schemas/Comparator' }
+        unit: { type: string }
+
+    Comparator:
+      type: string
+      enum: ['<', '<=', '>', '>=']
+      description: |
+        As in FHIR `valueQuantity.comparator`. When it is present, the value is a limit and not
+        an exact result, for example `{ "value": 5, "comparator": "<" }` for "<5 mg/L". Values
+        like this are always kept, never dropped. When it is absent, the value is exact.
+
+    Performer:
+      type: object
+      required: [name, type]
+      properties:
+        name: { type: string, example: Hôpital Valmorin }
+        type: { const: laboratory }
+
+    Quantity:
+      type: object
+      required: [value, unit]
+      properties:
+        value: { type: number }
+        unit: { type: string }
+
+    RequestList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CareRequest' }
+
+    CareRequest:
+      type: object
+      description: Placeholder shape. A care-plan request from a care provider, received through MMD/PDHC.
+      required: [id, status, receivedAt]
+      properties:
+        id: { type: string }
+        serviceRequestGuid: { type: string, description: PDHC's ServiceRequest id. }
+        requester:
+          type: object
+          properties:
+            organization: { type: string }
+            practitioner: { type: string }
+        title: { type: string }
+        reason: { type: string }
+        period:
+          type: object
+          properties:
+            start: { type: string, format: date-time }
+            end: { type: string, format: date-time }
+        dataTypes:
+          type: array
+          items: { $ref: '#/components/schemas/ObservationType' }
+        status: { type: string, enum: [pending, accepted, declined] }
+        receivedAt: { type: string, format: date-time }
+
+    ConsentInput:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [accept, decline] }
+
+    ConsentDecision:
+      type: object
+      required: [requestId, decision, decidedAt, status]
+      properties:
+        requestId: { type: string }
+        decision: { type: string, enum: [accept, decline] }
+        decidedAt: { type: string, format: date-time }
+        status: { type: string, enum: [accepted, declined] }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, example: asof_out_of_range }
+            message: { type: string }
+
+    FhirMapping:
+      description: |
+        Codes used with `format=fhir` (FHIR R4). Every Observation has `subject` =
+        `Patient/{me.id}` with the personal identity number as identifier. Device data has
+        `device` = `Device/{deviceId}` with the device's name as `display`. Lab results have
+        `performer` with the care provider's name and an `issued` time.
+
+        | type | category | Observation.code | value / components (UCUM) |
+        |---|---|---|---|
+        | glucose | laboratory | LOINC 105272-9 Glucose [Moles/volume] in Interstitial fluid | valueQuantity mmol/L |
+        | blood-pressure | vital-signs | LOINC 85354-9 Blood pressure panel | 8480-6 systolic, 8462-4 diastolic (mm[Hg]); 8867-4 heart rate (/min) |
+        | bmi | vital-signs | LOINC 39156-5 Body mass index | valueQuantity kg/m2; components 29463-7 body weight (kg), 8302-2 body height (cm) |
+        | sleep | activity | local `sleep-night` | 93832-4 Sleep duration (min); local `awakenings` ({count}); effectivePeriod |
+        | anxiety | survey | local `anxiety-self-rating` | valueInteger 0–10 |
+        | stress | survey | local `stress-self-rating` | valueInteger 0–10 |
+        | crp | laboratory | LOINC 1988-5 C reactive protein [Mass/volume] in Serum or Plasma | valueQuantity mg/L, with `comparator` when there is one |
+
+        "Local" means the code system `https://halsaplus.example/codes`. These are Hälsa+'s own
+        demo codes. The self-ratings are not a validated instrument and do not claim to be one.
+        As everywhere in the API, there is no `interpretation` and no `referenceRange`.

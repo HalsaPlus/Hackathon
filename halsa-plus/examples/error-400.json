@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "asof_out_of_range",
+    "message": "asOf must lie between 2026-02-28T23:00:00Z and 2026-12-17T22:59:59Z."
+  }
+}

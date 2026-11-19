@@ -1,0 +1,72 @@
+{
+  "asOf": "2026-11-15T22:59:00Z",
+  "items": [
+    {
+      "id": "bmi-20260823T060000Z",
+      "type": "bmi",
+      "status": "final",
+      "sourceType": "device",
+      "deviceId": "506bfdb7-f834-57d6-8631-9b8ba5a24897",
+      "effectiveDateTime": "2026-08-23T06:00:00Z",
+      "value": 21,
+      "unit": "kg/m²",
+      "components": [
+        {
+          "code": "weight",
+          "value": 59.3,
+          "unit": "kg"
+        },
+        {
+          "code": "height",
+          "value": 168,
+          "unit": "cm"
+        }
+      ]
+    },
+    {
+      "id": "bmi-20261108T070000Z",
+      "type": "bmi",
+      "status": "final",
+      "sourceType": "device",
+      "deviceId": "506bfdb7-f834-57d6-8631-9b8ba5a24897",
+      "effectiveDateTime": "2026-11-08T07:00:00Z",
+      "value": 21.5,
+      "unit": "kg/m²",
+      "components": [
+        {
+          "code": "weight",
+          "value": 60.8,
+          "unit": "kg"
+        },
+        {
+          "code": "height",
+          "value": 168,
+          "unit": "cm"
+        }
+      ]
+    },
+    {
+      "id": "bmi-20261115T070000Z",
+      "type": "bmi",
+      "status": "final",
+      "sourceType": "device",
+      "deviceId": "506bfdb7-f834-57d6-8631-9b8ba5a24897",
+      "effectiveDateTime": "2026-11-15T07:00:00Z",
+      "value": 21.6,
+      "unit": "kg/m²",
+      "components": [
+        {
+          "code": "weight",
+          "value": 60.9,
+          "unit": "kg"
+        },
+        {
+          "code": "height",
+          "value": 168,
+          "unit": "cm"
+        }
+      ]
+    }
+  ],
+  "nextCursor": null
+}

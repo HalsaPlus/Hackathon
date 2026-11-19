@@ -1,0 +1,46 @@
+{
+  "asOf": "2026-11-15T22:59:00Z",
+  "items": [
+    {
+      "id": "anxiety-20261113T201200Z",
+      "type": "anxiety",
+      "status": "final",
+      "sourceType": "patient-reported",
+      "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+      "effectiveDateTime": "2026-11-13T20:12:00Z",
+      "value": 4,
+      "unit": "0–10"
+    },
+    {
+      "id": "stress-20261113T201200Z",
+      "type": "stress",
+      "status": "final",
+      "sourceType": "patient-reported",
+      "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+      "effectiveDateTime": "2026-11-13T20:12:00Z",
+      "value": 5,
+      "unit": "0–10"
+    },
+    {
+      "id": "anxiety-20261115T203000Z",
+      "type": "anxiety",
+      "status": "final",
+      "sourceType": "patient-reported",
+      "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+      "effectiveDateTime": "2026-11-15T20:30:00Z",
+      "value": 3,
+      "unit": "0–10"
+    },
+    {
+      "id": "stress-20261115T203000Z",
+      "type": "stress",
+      "status": "final",
+      "sourceType": "patient-reported",
+      "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+      "effectiveDateTime": "2026-11-15T20:30:00Z",
+      "value": 4,
+      "unit": "0–10"
+    }
+  ],
+  "nextCursor": null
+}

@@ -1,0 +1,67 @@
+{
+  "asOf": "2026-12-16T12:00:00Z",
+  "items": [
+    {
+      "id": "crp-20260824T174800Z",
+      "type": "crp",
+      "status": "final",
+      "sourceType": "care-provider-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Hôpital Valmorin",
+        "type": "laboratory"
+      },
+      "effectiveDateTime": "2026-08-24T17:48:00Z",
+      "issued": "2026-08-24T18:41:00Z",
+      "value": 3,
+      "unit": "mg/L"
+    },
+    {
+      "id": "crp-20260910T062000Z",
+      "type": "crp",
+      "status": "final",
+      "sourceType": "care-provider-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Hôpital Valmorin",
+        "type": "laboratory"
+      },
+      "effectiveDateTime": "2026-09-10T06:20:00Z",
+      "issued": "2026-09-10T09:05:00Z",
+      "value": 2,
+      "unit": "mg/L"
+    },
+    {
+      "id": "crp-20261020T063500Z",
+      "type": "crp",
+      "status": "final",
+      "sourceType": "care-provider-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Hôpital Valmorin",
+        "type": "laboratory"
+      },
+      "effectiveDateTime": "2026-10-20T06:35:00Z",
+      "issued": "2026-10-20T08:50:00Z",
+      "value": 4,
+      "unit": "mg/L"
+    },
+    {
+      "id": "crp-20261215T071000Z",
+      "type": "crp",
+      "status": "preliminary",
+      "sourceType": "care-provider-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Vårdcentralen Norrskogen",
+        "type": "laboratory"
+      },
+      "effectiveDateTime": "2026-12-15T07:10:00Z",
+      "issued": "2026-12-15T12:30:00Z",
+      "value": 5,
+      "comparator": "<",
+      "unit": "mg/L"
+    }
+  ],
+  "nextCursor": null
+}
