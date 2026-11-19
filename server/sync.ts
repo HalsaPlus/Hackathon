@@ -1,14 +1,16 @@
 import { run, now } from './db.ts';
 import { InboundError, parseDelivery } from './fhir.ts';
 import { acknowledge, download, fetchFeed, PdhcError } from './pdhc.ts';
-import { applyPlanTemplates } from './plandefinition.ts';
+import { applyDeliveredCarePlan, applyPlanTemplates } from './plandefinition.ts';
 import {
   type ConnectionRow,
   getConnection,
   listConnections,
   logInbound,
+  openRequestGuids,
   serviceRequestPdhcUpdatedAt,
   setAckStatus,
+  setPdhcState,
   storeDelivery,
 } from './store.ts';
 
@@ -16,6 +18,11 @@ import {
 
 const PAGE_SIZE = 50;
 const MAX_PAGES = 20;
+/** The feed's own maximum. */
+const FULL_FEED_LIMIT = 200;
+/** How often a request missing from the feed but still open is downloaded again. */
+const RECHECK_MS = 15 * 60 * 1000;
+const lastVanishedCheck = new Map<string, number>();
 const running = new Set<number>();
 
 function errorMessage(error: unknown) {
@@ -34,7 +41,7 @@ export async function syncConnection(id: number): Promise<{ ok: boolean; message
   if (running.has(id)) return { ok: false, message: 'A fetch is already running.' };
   running.add(id);
 
-  const counts = { created: 0, updated: 0, unchanged: 0, failed: 0 };
+  const counts = { created: 0, updated: 0, unchanged: 0, closed: 0, failed: 0 };
   let since = connection.feed_since;
   let newestSeen = since;
   let ok = true;
@@ -56,8 +63,11 @@ export async function syncConnection(id: number): Promise<{ ok: boolean; message
             patientGuid: body.patient_guid,
             contractGuid: body.contract_guid,
             providerOrgGuid: body.provider_org_guid,
+            pdhcStatus: body.sr_status ?? item.sr_status,
+            isOpen: typeof body.is_open === 'boolean' ? body.is_open : undefined,
+            carePlanGuid: body.care_plan_guid,
           });
-          const problems = await applyPlanTemplates(parsed);
+          const problems = applyDeliveredCarePlan(parsed, body.care_plan) ? [] : await applyPlanTemplates(parsed);
           const outcome = storeDelivery(parsed, {
             channel: 'poll',
             connectionId: connection.id,
@@ -74,10 +84,12 @@ export async function syncConnection(id: number): Promise<{ ok: boolean; message
       if (feed.items.length < PAGE_SIZE || newestSeen === since) break;
       since = newestSeen;
     }
+    counts.closed = await closeVanished(connection);
     const parts = [
       counts.created && `${counts.created} new`,
       counts.updated && `${counts.updated} changed`,
       counts.unchanged && `${counts.unchanged} unchanged`,
+      counts.closed && `${counts.closed} closed in PDHC`,
       counts.failed && `${counts.failed} failed`,
     ].filter(Boolean);
     message = parts.length ? `Fetched: ${parts.join(', ')}.` : 'No new requests.';
@@ -97,6 +109,49 @@ export async function syncConnection(id: number): Promise<{ ok: boolean; message
     { at: now(), message, ok, since: newestSeen, id },
   );
   return { ok, message };
+}
+
+/**
+ * The feed only lists open requests: one PDHC archives or revokes just stops
+ * appearing, while its FHIR resource still says "active". So every request
+ * MMD still treats as open but that is missing from the full feed is
+ * downloaded once more to read sr_status and is_open. Returns how many were
+ * found closed. Skipped when the feed is longer than one page, since then a
+ * missing request may just be on another page.
+ */
+async function closeVanished(connection: ConnectionRow): Promise<number> {
+  const stillOpen = openRequestGuids(connection.id);
+  if (!stillOpen.length) return 0;
+  const feed = await fetchFeed(connection, null, FULL_FEED_LIMIT);
+  if (feed.total === undefined || feed.total > feed.items.length) return 0;
+  const listed = new Set(feed.items.map((item) => item.service_request_guid));
+
+  let closed = 0;
+  for (const guid of stillOpen.filter((g) => !listed.has(g))) {
+    // Every download is logged at PDHC as an access to patient data, so a
+    // request that is missing but still open is not asked about every minute.
+    const checkedAt = lastVanishedCheck.get(guid);
+    if (checkedAt && Date.now() - checkedAt < RECHECK_MS) continue;
+    lastVanishedCheck.set(guid, Date.now());
+    try {
+      const body = await download(connection, guid);
+      const isOpen = typeof body.is_open === 'boolean' ? body.is_open : null;
+      if (setPdhcState(guid, { status: body.sr_status ?? null, isOpen, carePlanGuid: body.care_plan_guid })) {
+        closed += 1;
+        logInbound('poll', connection.id, guid, 'updated', `Closed in PDHC (${body.sr_status ?? 'is_open false'}). Hidden from the patient.`);
+      }
+    } catch (error) {
+      // Gone altogether: PDHC no longer lets this provider read it.
+      if (error instanceof PdhcError && (error.status === 403 || error.status === 404 || error.status === 410)) {
+        setPdhcState(guid, { status: 'unavailable', isOpen: false });
+        closed += 1;
+        logInbound('poll', connection.id, guid, 'updated', `PDHC no longer gives access (${error.status}). Hidden from the patient.`);
+      } else {
+        logInbound('poll', connection.id, guid, 'error', `Could not check whether it is still open: ${errorMessage(error)}`);
+      }
+    }
+  }
+  return closed;
 }
 
 /** Polls every connection that has automatic fetching turned on. */

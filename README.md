@@ -57,7 +57,9 @@ PDHC delivers requests in two ways, and the app handles both:
 - **Fetch:** the app reads `GET /provider/feed` and downloads new or changed requests with `GET /provider/download/{sr}`.
 - **Push:** PDHC sends a FHIR `Bundle` to `POST /api/v1/inbound/push` with `X-Push-Secret`. The app answers `202` and acknowledges with `POST /provider/receipt/{receipt_token}/ack`. Push needs the app on a public address.
 
-Reports from the patient app go to `POST /provider/report/{sr}` on gateway.pdhc, with the PAT and the request's `grant_token`. A demo request stays in demo mode, and the app says so.
+Reports from the patient app go to `POST /provider/report/{sr}` on gateway.pdhc, with the PAT and the request's `grant_token`. Numeric values are sent as JSON numbers; the gateway refuses text with 422. It answers 202 with `status: accepted` and a receipt per report. A demo request stays in demo mode, and the app says so.
+
+To try the round trip, press **Send test observations** on the connection. For every open request it sends one set of synthetic values per activity, varied and now and then outside the plan's range, exactly as if the patient had reported them. No two parameters get the same value in one click, and each value's note says it is test data and which parameter it was meant for (`… systolic-blood-pressure = 135 mmHg`), so a value that ends up on the wrong parameter at PDHC can be traced. By default each value goes in a report of its own with its own `recorded_at`; untick the box to send all of an activity's values in one report, as the patient app does. The table under the button shows each value, its `transaction_guid` and PDHC's receipt, and **Copy what was sent** copies the exact payloads (without the grant token) to share with PDHC.
 
 ## Other services
 
@@ -97,6 +99,7 @@ The chat is also available as FHIR for the control tower: `GET /api/fhir/Communi
 
 ## Open questions
 
-- **Schedules:** answered by the first real delivery. The CarePlan only lists the concepts each activity measures (`performedActivity`). The schedule, titles, ranges and `transaction_guid` come from the plan template in `instantiatesCanonical` on plan.pdhc. If plan.pdhc cannot be reached, the request is stored without a schedule and the inbound log says so.
-- **Matching values:** the gateway matches values by `transaction_guid`, which now comes from the plan template. Whether the gateway accepts those GUIDs has not been tried yet. Without a template, the concept GUID is used as a fallback.
+- **Schedules:** answered. The FHIR CarePlan only lists the concepts each activity measures (`performedActivity`). The schedule, titles, ranges and `transaction_guid` come from `care_plan` in `/provider/download`, the patient's instantiated CarePlan frozen when the request was made. Without it, the app falls back to the plan template in `instantiatesCanonical` on plan.pdhc. If that cannot be reached either, the request is stored without a schedule and the inbound log says so.
+- **Closed requests:** PDHC archives a request without changing the FHIR `status`. The app reads `sr_status` and `is_open` from the download, and checks requests that vanish from the feed. A closed request is hidden from the patient and takes no reports. The admin console still shows it, marked as closed.
+- **Matching values:** answered. The gateway matches values by `transaction_guid` from the frozen `care_plan`, and accepted them on 2026-11-19 (202, one receipt per report). Without them, the concept GUID is used as a fallback, which has not been tried.
 - **The chat in the CDR:** the PDHC CDR manual does not list `Communication` or message Bundles, so whether the CDR accepts the chat has to be tried.

@@ -86,6 +86,12 @@ function periodUnit(value: unknown): PeriodUnit | undefined {
 
 // --- Timing -------------------------------------------------------------------
 
+/** The Timing.repeat fields that say when or how often; `duration` only says how long. */
+const REPEAT_SCHEDULE_FIELDS = [
+  'frequency', 'frequencyMax', 'period', 'periodMax', 'count', 'countMax',
+  'dayOfWeek', 'timeOfDay', 'when', 'boundsDuration', 'boundsPeriod', 'boundsRange',
+];
+
 /** FHIR Timing (event[] or repeat). */
 export function timingFromFhir(timing: unknown): Timing | undefined {
   if (!isObject(timing)) return undefined;
@@ -95,6 +101,10 @@ export function timingFromFhir(timing: unknown): Timing | undefined {
 
   const repeat = timing.repeat;
   if (!isObject(repeat)) return undefined;
+
+  // Nothing that says how often: only how long each occasion lasts
+  // (`duration`), as plan.pdhc writes a single occasion. That is once, not daily.
+  if (!REPEAT_SCHEDULE_FIELDS.some((field) => repeat[field] != null)) return { kind: 'once' };
 
   const result: Timing = {
     kind: 'repeat',
@@ -191,6 +201,24 @@ function pdhcConcepts(raw: Json): Transaction[] {
   return result;
 }
 
+/**
+ * The concepts in plan.pdhc's FHIR PlanDefinition: each activity is an
+ * `action` whose nested `action[]` are the data points, one per concept, with
+ * `_pdhc_concept_guid` (or the concept URL in `definitionCanonical`).
+ */
+function pdhcSubActions(raw: Json): Transaction[] {
+  const result: Transaction[] = [];
+  for (const item of list(raw.action)) {
+    if (!isObject(item)) continue;
+    const conceptGuid =
+      text(item._pdhc_concept_guid) ?? text(item.definitionCanonical)?.match(/\/concepts\/([^/?#]+)$/)?.[1];
+    const name = text(item.title) ?? conceptText(item.code);
+    if (!conceptGuid || !name) continue;
+    result.push({ conceptGuid, name, requirement: text(item.requiredBehavior) });
+  }
+  return result;
+}
+
 export function parseTransactions(value: unknown): Transaction[] {
   const result: Transaction[] = [];
   for (const item of list(value)) {
@@ -206,6 +234,7 @@ export function parseTransactions(value: unknown): Transaction[] {
       rangeMax: number(item.range_max),
       expected: text(item.expected_value),
       unit: text(item.unit_name) ?? text(item.concept_unit_name) ?? text(item.unit),
+      responseType: text(item.response_type),
     });
   }
   return result;
@@ -237,12 +266,14 @@ export function parseActivity(raw: unknown, position: number, contained: Map<str
   const givenTitle = text(raw.title) ?? codeText ?? text(raw.plannedActivityReference?.display) ?? description;
   const transactions = parseTransactions(raw.transactions ?? detail?.transactions ?? raw.transaction);
   if (!transactions.length) transactions.push(...pdhcConcepts(raw));
+  if (!transactions.length) transactions.push(...pdhcSubActions(raw));
   const title =
     givenTitle ?? (transactions.length ? transactions.map((t) => t.name).join(', ') : `Activity ${position + 1}`);
 
   const timing =
     timingFromFhir(detail?.scheduledTiming) ??
     timingFromFhir(raw.timingTiming) ??
+    timingFromFhir(raw.timing) ?? // care_plan.activities[] in /provider/download
     timingFromPdhcFields(raw) ??
     (planned ? timingFromOccurrence(planned) : undefined) ??
     (text(detail?.scheduledString) || text(raw.timingString) ? { kind: 'unscheduled' as const } : undefined) ??
@@ -251,12 +282,16 @@ export function parseActivity(raw: unknown, position: number, contained: Map<str
       : undefined) ??
     ({ kind: 'unscheduled' } satisfies Timing);
 
+  // A participant's role says more than its type: plan.pdhc's FHIR writes
+  // type "practitioner" with role "Patient" for what the patient does.
+  const participant = list(raw.participant)[0] as Json | undefined;
   const performerType =
     text(raw.performer_type) ??
     conceptText(list(detail?.performer)[0]) ??
     text((list(detail?.performer)[0] as Json | undefined)?.display) ??
-    conceptText((list(raw.participant)[0] as Json | undefined)?.type) ??
-    text((list(raw.participant)[0] as Json | undefined)?.type) ??
+    conceptText(participant?.role) ??
+    conceptText(participant?.type) ??
+    text(participant?.type) ??
     null;
 
   // The key only depends on the delivery itself, so it stays the same whether
@@ -334,6 +369,10 @@ export interface ParsedDelivery {
   providerOrgGuid: string | null;
   receiptToken: string | null;
   grantToken: string | null;
+  /** What PDHC says outside the FHIR resource (download only); null when not said. */
+  pdhcStatus: string | null;
+  isOpen: boolean | null;
+  carePlanGuid: string | null;
   /** Every care plan in the request; several when it covers several conditions. */
   carePlans: ParsedCarePlan[];
 }
@@ -381,6 +420,10 @@ export interface DeliveryContext {
   patientGuid?: string;
   contractGuid?: string;
   providerOrgGuid?: string;
+  /** sr_status, is_open and care_plan_guid from /provider/download. */
+  pdhcStatus?: string;
+  isOpen?: boolean;
+  carePlanGuid?: string;
 }
 
 /**
@@ -508,6 +551,9 @@ export function parseDelivery(resource: unknown, context: DeliveryContext = {}):
     providerOrgGuid: context.providerOrgGuid ?? tags.organisation_guid ?? null,
     receiptToken: context.receiptToken ?? tags.receipt_token ?? null,
     grantToken: context.grantToken ?? tags.grant_token ?? null,
+    pdhcStatus: context.pdhcStatus ?? null,
+    isOpen: context.isOpen ?? null,
+    carePlanGuid: context.carePlanGuid ?? null,
     carePlans,
   };
 }

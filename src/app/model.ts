@@ -30,7 +30,9 @@ export const formatWeekday = (t: number | string) => weekday.format(new Date(t))
 export const formatClock = (t: number | string) => clock.format(new Date(t));
 
 export function activeRequests(view: AppView) {
-  return view.requests.filter((r) => !r.status || r.status === 'active');
+  // PDHC closes a request (archived, revoked) outside the FHIR resource, whose
+  // status can still say "active"; `closed` is what counts.
+  return view.requests.filter((r) => !r.closed && (!r.status || r.status === 'active'));
 }
 
 /**
