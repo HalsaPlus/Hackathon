@@ -1,0 +1,10 @@
+{
+  "id": "anxiety-20261119T113000Z-520725",
+  "type": "anxiety",
+  "sourceType": "patient-reported",
+  "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+  "effectiveDateTime": "2026-11-19T11:30:00Z",
+  "value": 4,
+  "unit": "0–10",
+  "status": "final"
+}

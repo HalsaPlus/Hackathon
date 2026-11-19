@@ -1,0 +1,116 @@
+{
+  "asOf": "2026-11-15T22:59:00Z",
+  "items": [
+    {
+      "id": "blood-pressure-20261115T200600Z",
+      "type": "blood-pressure",
+      "sourceType": "device",
+      "deviceId": "487a0ac7-adec-5ab4-9a07-451e80585c1e",
+      "effectiveDateTime": "2026-11-15T20:06:00Z",
+      "components": [
+        {
+          "code": "systolic",
+          "value": 115,
+          "unit": "mmHg"
+        },
+        {
+          "code": "diastolic",
+          "value": 76,
+          "unit": "mmHg"
+        }
+      ],
+      "status": "final"
+    },
+    {
+      "id": "glucose-20261115T225200Z",
+      "type": "glucose",
+      "sourceType": "device",
+      "deviceId": "6f9f647e-3f38-5bb4-a897-75ebf3d250b7",
+      "effectiveDateTime": "2026-11-15T22:52:00Z",
+      "value": 11,
+      "unit": "mmol/L",
+      "status": "final"
+    },
+    {
+      "id": "sleep-20261115T062500Z",
+      "type": "sleep",
+      "sourceType": "device",
+      "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
+      "effectivePeriod": {
+        "start": "2026-11-14T22:44:00Z",
+        "end": "2026-11-15T06:25:00Z"
+      },
+      "components": [
+        {
+          "code": "sleep-duration",
+          "value": 441,
+          "unit": "min"
+        },
+        {
+          "code": "awakenings",
+          "value": 3,
+          "unit": "count"
+        }
+      ],
+      "status": "final"
+    },
+    {
+      "id": "anxiety-20261114T174300Z",
+      "type": "anxiety",
+      "sourceType": "patient-reported",
+      "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+      "effectiveDateTime": "2026-11-14T17:43:00Z",
+      "value": 1,
+      "unit": "0–10",
+      "status": "final"
+    },
+    {
+      "id": "stress-20261114T174300Z",
+      "type": "stress",
+      "sourceType": "patient-reported",
+      "deviceId": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+      "effectiveDateTime": "2026-11-14T17:43:00Z",
+      "value": 5,
+      "unit": "0–10",
+      "status": "final"
+    },
+    {
+      "id": "bmi-20261115T070000Z",
+      "type": "bmi",
+      "sourceType": "device",
+      "deviceId": "506bfdb7-f834-57d6-8631-9b8ba5a24897",
+      "effectiveDateTime": "2026-11-15T07:00:00Z",
+      "value": 21.6,
+      "unit": "kg/m²",
+      "components": [
+        {
+          "code": "weight",
+          "value": 60.9,
+          "unit": "kg"
+        },
+        {
+          "code": "height",
+          "value": 168,
+          "unit": "cm"
+        }
+      ],
+      "status": "final"
+    },
+    {
+      "id": "crp-20261020T063000Z",
+      "type": "crp",
+      "sourceType": "external-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Laboratoire Belvasse",
+        "type": "laboratory",
+        "city": "Paris"
+      },
+      "effectiveDateTime": "2026-10-20T06:30:00Z",
+      "issued": "2026-10-20T14:00:00Z",
+      "value": 7,
+      "unit": "mg/L",
+      "status": "final"
+    }
+  ]
+}

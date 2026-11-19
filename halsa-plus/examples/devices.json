@@ -1,0 +1,65 @@
+{
+  "asOf": "2026-11-15T22:59:00Z",
+  "items": [
+    {
+      "id": "6f9f647e-3f38-5bb4-a897-75ebf3d250b7",
+      "type": "cgm-sensor",
+      "name": "CGM sensor (demo)",
+      "source": "bluetooth",
+      "types": [
+        "glucose"
+      ],
+      "since": "2019-05-20",
+      "lastSyncAt": "2026-11-15T22:52:00Z"
+    },
+    {
+      "id": "487a0ac7-adec-5ab4-9a07-451e80585c1e",
+      "type": "blood-pressure-monitor",
+      "name": "Blood pressure monitor (demo)",
+      "source": "bluetooth",
+      "types": [
+        "blood-pressure"
+      ],
+      "since": "2026-03-01",
+      "lastSyncAt": "2026-11-15T20:06:00Z"
+    },
+    {
+      "id": "506bfdb7-f834-57d6-8631-9b8ba5a24897",
+      "type": "scale",
+      "name": "Scale (demo)",
+      "source": "bluetooth",
+      "types": [
+        "bmi"
+      ],
+      "since": "2026-03-01",
+      "lastSyncAt": "2026-11-15T07:00:00Z"
+    },
+    {
+      "id": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
+      "type": "smartwatch",
+      "name": "Smartwatch (demo)",
+      "source": "bluetooth",
+      "types": [
+        "sleep"
+      ],
+      "since": "2026-03-01",
+      "lastSyncAt": "2026-11-15T06:25:00Z"
+    },
+    {
+      "id": "6416ebbc-5cba-5d4d-875b-381123d451ea",
+      "type": "app",
+      "name": "Hälsa+ app",
+      "source": "manual-entry",
+      "types": [
+        "anxiety",
+        "stress",
+        "blood-pressure",
+        "glucose",
+        "bmi",
+        "sleep"
+      ],
+      "since": "2026-03-01",
+      "lastSyncAt": "2026-11-14T17:43:00Z"
+    }
+  ]
+}

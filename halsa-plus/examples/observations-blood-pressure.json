@@ -1,0 +1,66 @@
+{
+  "asOf": "2026-11-15T22:59:00Z",
+  "items": [
+    {
+      "id": "blood-pressure-20261114T060600Z",
+      "type": "blood-pressure",
+      "sourceType": "device",
+      "deviceId": "487a0ac7-adec-5ab4-9a07-451e80585c1e",
+      "effectiveDateTime": "2026-11-14T06:06:00Z",
+      "components": [
+        {
+          "code": "systolic",
+          "value": 113,
+          "unit": "mmHg"
+        },
+        {
+          "code": "diastolic",
+          "value": 74,
+          "unit": "mmHg"
+        }
+      ],
+      "status": "final"
+    },
+    {
+      "id": "blood-pressure-20261114T204000Z",
+      "type": "blood-pressure",
+      "sourceType": "device",
+      "deviceId": "487a0ac7-adec-5ab4-9a07-451e80585c1e",
+      "effectiveDateTime": "2026-11-14T20:40:00Z",
+      "components": [
+        {
+          "code": "systolic",
+          "value": 117,
+          "unit": "mmHg"
+        },
+        {
+          "code": "diastolic",
+          "value": 77,
+          "unit": "mmHg"
+        }
+      ],
+      "status": "final"
+    },
+    {
+      "id": "blood-pressure-20261115T054300Z",
+      "type": "blood-pressure",
+      "sourceType": "device",
+      "deviceId": "487a0ac7-adec-5ab4-9a07-451e80585c1e",
+      "effectiveDateTime": "2026-11-15T05:43:00Z",
+      "components": [
+        {
+          "code": "systolic",
+          "value": 119,
+          "unit": "mmHg"
+        },
+        {
+          "code": "diastolic",
+          "value": 76,
+          "unit": "mmHg"
+        }
+      ],
+      "status": "final"
+    }
+  ],
+  "nextCursor": "WzE3OTQ3MjEzODAwMDAsImJsb29kLXByZXNzdXJlLTIwMjYxMTE1VDA1NDMwMFoiXQ"
+}

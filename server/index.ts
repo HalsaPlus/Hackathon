@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import express from 'express';
+import { halsaPlusFromEnv } from '../halsa-plus/src/mount.ts';
 import { loginConfigured, setupAuth } from './auth.ts';
 import { setupApi, setupPushEndpoint } from './routes.ts';
 import { startPolling } from './sync.ts';
@@ -35,6 +36,10 @@ app.get('/api/health', (_req, res) => {
 // PDHC pushes ServiceRequests here. It authenticates with X-Push-Secret,
 // not with a login session, so it is registered before setupAuth().
 setupPushEndpoint(app);
+
+// The simulated Hälsa+ API (halsa-plus/). Every call carries a patient's
+// bearer token instead of the admin login, so it is mounted before setupAuth().
+app.use('/halsa-plus', halsaPlusFromEnv());
 
 // What a phone needs to install the patient app: the manifest, the icons and
 // the service worker. None of it holds patient data.
