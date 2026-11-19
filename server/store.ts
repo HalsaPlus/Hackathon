@@ -589,17 +589,40 @@ export function addMessage(
   text: string,
   serviceRequestGuid: string | null = null,
   at: string = now(),
+  /** The AI assistant the patient wrote through ("ChatGPT"), if any. */
+  via: string | null = null,
 ): MessageView {
   const result = run(
-    `INSERT INTO messages (patient_guid, sender, text, service_request_guid, created_at)
-     VALUES (:patient, :sender, :text, :sr, :at)`,
-    { patient: patientGuid, sender, text: text.slice(0, 2000), sr: serviceRequestGuid, at },
+    `INSERT INTO messages (patient_guid, sender, text, service_request_guid, created_at, via)
+     VALUES (:patient, :sender, :text, :sr, :at, :via)`,
+    { patient: patientGuid, sender, text: text.slice(0, 2000), sr: serviceRequestGuid, at, via },
   );
   const id = Number(result.lastInsertRowid);
   // Keep every message as a FHIR R5 Communication too.
-  const communication = toCommunication({ id, patientGuid, sender, text, serviceRequestGuid, createdAt: at });
+  const communication = toCommunication({ id, patientGuid, sender, text, serviceRequestGuid, createdAt: at, via });
   run('UPDATE messages SET fhir_json = :fhir WHERE id = :id', { id, fhir: JSON.stringify(communication) });
-  return { id, sender, text, serviceRequestGuid, createdAt: at, cdrStatus: null };
+  return { id, sender, text, serviceRequestGuid, createdAt: at, cdrStatus: null, via };
+}
+
+/** The chat with the care team, oldest first. */
+export function listMessages(patientGuid: string): MessageView[] {
+  return all<{
+    id: number;
+    sender: MessageView['sender'];
+    text: string;
+    service_request_guid: string | null;
+    created_at: string;
+    cdr_status: MessageView['cdrStatus'];
+    via: string | null;
+  }>('SELECT * FROM messages WHERE patient_guid = :p ORDER BY created_at, id', { p: patientGuid }).map((row) => ({
+    id: row.id,
+    sender: row.sender,
+    text: row.text,
+    serviceRequestGuid: row.service_request_guid,
+    createdAt: row.created_at,
+    cdrStatus: row.cdr_status,
+    via: row.via,
+  }));
 }
 
 export function setMessageCdrOutcome(id: number, outcome: CdrOutcome) {
@@ -764,20 +787,6 @@ export function getAppView(patientGuid: string): AppView | undefined {
     { p: patientGuid },
   );
   const ips = ipsRow ? parseIps(JSON.parse(ipsRow.bundle_json), ipsRow.source, ipsRow.synthetic === 1, ipsRow.fetched_at) : null;
-  const messages: MessageView[] = all<{
-    id: number;
-    sender: MessageView['sender'];
-    text: string;
-    service_request_guid: string | null;
-    created_at: string;
-    cdr_status: MessageView['cdrStatus'];
-  }>('SELECT * FROM messages WHERE patient_guid = :p ORDER BY created_at, id', { p: patientGuid }).map((row) => ({
-    id: row.id,
-    sender: row.sender,
-    text: row.text,
-    serviceRequestGuid: row.service_request_guid,
-    createdAt: row.created_at,
-    cdrStatus: row.cdr_status,
-  }));
+  const messages = listMessages(patientGuid);
   return { patient: view.patient, requests: view.requests, observations, ips, messages };
 }

@@ -84,6 +84,32 @@ Only what the server needs before it can open the database:
 
 The chat is also available as FHIR for the control tower: `GET /api/fhir/Communication?patient={id}`.
 
+## AI assistants (MCP)
+
+MMD is also an MCP server (issue #7). MCP is an open standard for how AI assistants call a service. With it, a patient can talk to ChatGPT, Claude or another assistant about their plan and values, and ask it to write to the care team. The assistant only reaches MMD, never PDHC. It never sees the PDHC token, `grant_token`, transaction GUIDs or the personal identity number, only what the patient sees in the app.
+
+| Tool | What it gives |
+| --- | --- |
+| `get_my_plan` | The open care plans: goals, and per activity who does it, the schedule, what is measured with its target, and occasions done |
+| `get_my_values` | Reported values for up to 120 days, optionally for one parameter, marked when outside the target |
+| `get_today` | What is due today and whether it is done |
+| `get_health_summary` | The IPS: conditions, medications, allergies, results |
+| `get_messages` | The latest messages with the care team |
+| `send_message_to_care_team` | Writes to the care team in the same chat as the app, marked "via ChatGPT". Only with `confirmed: true` after the patient has approved the exact text. |
+
+**To connect ChatGPT:**
+1. Start a tunnel to the app, for example `cloudflared tunnel --url http://localhost:3001`. ChatGPT cannot reach a local computer.
+2. Enter the tunnel's address as **This app** under **Connection → Other services**.
+3. On the patient's page in the admin console, make a link under **AI assistants (MCP)**. It is shown once.
+4. Add the link in ChatGPT as an MCP server with no authentication (Settings → Apps & Connectors → Advanced → Developer mode). If an assistant wants an API key instead, use `{address}/mcp` and the key shown with the link.
+
+The care team reads and answers the chat under **Chat with the patient** on the same page. Links can be revoked there. Only a hash of each link's secret is stored.
+
+**Limits.**
+- **Synthetic data only.** Everything the patient writes to the assistant goes to whoever runs it.
+- **Demo sign-in.** The secret link is a demo sign-in. Real patients need OAuth, a data processing agreement, and a GDPR and PDL assessment, and health advice from a chatbot may count as a medical device.
+- **ChatGPT plans.** On some ChatGPT plans custom connectors may be read-only, so sending a message may not be offered there.
+
 ## How it is built
 
 - **Server:** Express, in `server/`.
@@ -94,6 +120,7 @@ The chat is also available as FHIR for the control tower: `GET /api/fhir/Communi
   - `messaging.ts` turns the chat into FHIR messaging.
   - `ips.ts` reads the IPS.
   - `settings.ts` stores how to reach Health Connect, the CDR and this app's address.
+  - `mcp.ts` is the MCP server for AI assistants, and `assistant.ts` handles its secret links per patient.
   - `demo.ts` builds Andrea.
 - **Patient app:** React, in `src/app/`. The screens are in `src/app/screens/`. The style follows Hälsa+ (MyMedicalData).
 - **Admin console:** React, in `src/`.
