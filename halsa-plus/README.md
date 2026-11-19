@@ -5,7 +5,7 @@
 En liten backend som låtsas vara Hälsa+, patientappen. Den har en patient, Andrea, med:
 - hennes egna mätvärden från flera enheter;
 - hennes självskattningar i appen;
-- de labbsvar hon har importerat från vården.
+- CRP-svar från ett externt labb som hon går till på eget initiativ (påhittat för demon).
 
 GUI:t anropar API:t. MMD och vården får samma data som FHIR.
 
@@ -83,7 +83,7 @@ Allt är **deterministiskt**. Samma dag får samma värden vid varje omstart.
 | `bmi` (+ `weight`, `height`) | Badrumsvåg, på söndagar | Vikten är **återanvänd** till och med 2026-11-15 och fortsätter sedan med samma modell. Längden är fast **168 cm**. BMI är vikt delat med längd i kvadrat, utan kategori. |
 | `sleep` | Smartklocka, varje natt | Ny: läggtid, vakentid, sovminuter och uppvaknanden. Några nätter saknas, när klockan inte bars. |
 | `anxiety`, `stress` | Hälsa+-appen, självskattning 0–10 per kväll | Ny, med missade dagar. Det är **inget validerat instrument**. |
-| `crp` | Labb hos en vårdgivare (labbsvar som Andrea har importerat) | Se nedan. |
+| `crp` | Externt labb (Laboratoire Belvasse, Paris, påhittat) | Se nedan. |
 
 **Scenariot:**
 - Andrea har bott i Paris sedan februari, och någon stress finns från början.
@@ -92,11 +92,14 @@ Allt är **deterministiskt**. Samma dag får samma värden vid varje omstart.
 - Efter utskrivningen förbättras det gradvis och ojämnt.
 
 **CRP:**
-- **Ur Andreas dokument:** Hôpital Valmorin, 2026-08-24 klockan 19:48 (Paris), 3 mg/L, utfärdat 20:41. Källan är `out/andrea/paris-lab.json` i repot Hackaton 2026. Dokumentets referensintervall och tolkning tas medvetet inte med. Inga andra CRP-värden finns i Andreas dokument eller i Hälsa+-demon.
-- **Genererade**, för datum utan dokument:
-  - 2026-09-10 och 2026-10-20, Hôpital Valmorin: uppföljning efter utskrivningen.
-  - 2026-12-15, Vårdcentralen Norrskogen: `<5` mg/L (`comparator: "<"`), ett planerat besök i Uppsala.
-- Värden under labbets gräns behåller sin `comparator` och tas aldrig bort.
+- **Påhittat för demon.** Andrea går på eget initiativ till ett externt labb, och svaren hamnar i Hälsa+.
+- **Labbet:** **Laboratoire Belvasse** i Paris. Det är ett påhittat labb och inget riktigt företag. Alla prover tas i Paris, där Andrea bor sedan 2026-02-01; hennes dokument anger inget slutdatum för den adressen.
+- **Datum:** ungefär en gång i månaden från mars.
+  - Inget prov i juli och inget under vårdtiden 24–27 augusti.
+  - Tre prover efter utskrivningen.
+  - Två prover i december (1/12 och 15/12). De syns bara med ett senare `asOf` och har då `status: preliminary`.
+- **Värden:** labbet svarar `<5` mg/L (`comparator: "<"`) när värdet ligger under dess gräns, och annars heltal (6, 7, 8). Värden med `comparator` tas aldrig bort.
+- **Sjukhusets labbsvar ingår inte:** Hôpital Valmorins labbsvar från akutbesöket finns bara i sjukhusets dokument (repot Hackaton 2026) och är inte med i Hälsa+-serien.
 
 **Inga tolkningar:** API:t har inga poäng, inga flaggor för högt, lågt eller normalt, inga färger, inga referensintervall och ingen statistik (medel, min, max). Ett test kontrollerar det.
 

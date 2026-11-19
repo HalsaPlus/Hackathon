@@ -2,7 +2,7 @@
 // 2026-03-01 to 28 days after the start date, sorted by the time it becomes
 // available. SYNTHETIC TEST DATA ONLY.
 
-import { CRP_RESULTS } from './crp.ts';
+import { CRP_LAB, CRP_RESULTS } from './crp.ts';
 import { generateExtension } from './extension.ts';
 import { generateHistory, HISTORY } from './history.ts';
 import { addDays, parisDate, parisTime } from './time.ts';
@@ -23,9 +23,9 @@ export interface Component {
 export interface StoredObservation {
   id: string;
   type: ObservationType;
-  sourceType: 'device' | 'patient-reported' | 'care-provider-lab';
+  sourceType: 'device' | 'patient-reported' | 'external-lab';
   deviceId: string | null;
-  performer?: { name: string; type: 'laboratory' };
+  performer?: { name: string; type: 'laboratory'; city: string };
   effectiveDateTime?: string;
   effectivePeriod?: { start: string; end: string };
   issued?: string;
@@ -142,9 +142,9 @@ export function buildDataset(startDate: string): Dataset {
     add(Date.parse(r.issued), {
       id: idFor('crp', sampled),
       type: 'crp',
-      sourceType: 'care-provider-lab',
+      sourceType: 'external-lab',
       deviceId: null,
-      performer: { name: r.provider, type: 'laboratory' },
+      performer: { name: CRP_LAB.name, type: 'laboratory', city: CRP_LAB.city },
       effectiveDateTime: isoTime(sampled),
       issued: isoTime(Date.parse(r.issued)),
       value: r.value,

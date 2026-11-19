@@ -64,15 +64,24 @@ test('blood pressure only a few times a week after the history', () => {
   assert.ok(newBp.length / weeks >= 1.5 && newBp.length / weeks <= 5, `${newBp.length} in ${weeks.toFixed(1)} weeks`);
 });
 
-test('CRP: the document value, generated values, and "<5" kept with its comparator', () => {
+test('CRP: one fictional external lab in Paris, roughly monthly, none during the stay', () => {
   const crp = buildDataset('2026-11-19').entries.filter((e) => e.observation.type === 'crp').map((e) => e.observation);
-  assert.equal(crp.length, 4);
-  assert.deepEqual(crp[0].performer, { name: 'Hôpital Valmorin', type: 'laboratory' });
-  assert.equal(crp[0].value, 3);
-  assert.equal(crp[0].effectiveDateTime, '2026-08-24T17:48:00Z');
+  assert.ok(crp.every((o) => o.sourceType === 'external-lab' && o.deviceId === null && o.issued && o.unit === 'mg/L'));
+  assert.ok(crp.every((o) => JSON.stringify(o.performer) === JSON.stringify({ name: 'Laboratoire Belvasse', type: 'laboratory', city: 'Paris' })));
+  const sampled = crp.map((o) => Date.parse(o.effectiveDateTime!));
+  // Not the hospital's result, and nothing between the emergency visit and discharge.
+  assert.ok(sampled.every((t) => t < ER_MS || t > DISCHARGE_MS));
+  assert.ok(!crp.some((o) => o.effectiveDateTime === '2026-08-24T17:48:00Z'));
+  // From spring, a few after discharge, and one or two in the four weeks after 2026-11-19.
+  assert.ok(sampled[0] < Date.parse('2026-04-01T00:00:00Z'));
+  const now = Date.parse('2026-11-19T12:00:00Z');
+  assert.ok(sampled.filter((t) => t > DISCHARGE_MS && t <= now).length >= 2);
+  const ahead = sampled.filter((t) => t > now && t <= now + 28 * 86_400_000).length;
+  assert.ok(ahead >= 1 && ahead <= 2);
+  for (let i = 1; i < sampled.length; i++) assert.ok(sampled[i] - sampled[i - 1] <= 50 * 86_400_000, 'roughly monthly');
+  // A value under the lab's limit keeps its comparator.
   const below = crp.find((o) => o.comparator);
-  assert.deepEqual([below?.comparator, below?.value, below?.unit, below?.performer?.name], ['<', 5, 'mg/L', 'Vårdcentralen Norrskogen']);
-  assert.ok(crp.every((o) => o.sourceType === 'care-provider-lab' && o.deviceId === null && o.issued));
+  assert.deepEqual([below?.comparator, below?.value], ['<', 5]);
 });
 
 test('self-ratings are integers 0–10 and BMI matches weight and height', () => {

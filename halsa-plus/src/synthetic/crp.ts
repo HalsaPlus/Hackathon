@@ -1,34 +1,38 @@
-// CRP: lab results from Andrea's care providers that she has imported into
-// Hälsa+. SYNTHETIC TEST DATA ONLY. Fixed values, not random.
+// CRP: lab results Andrea gets from an external lab she visits on her own
+// initiative; the results end up in Hälsa+. INVENTED FOR THE DEMO, SYNTHETIC
+// TEST DATA ONLY. Fixed values, not random.
 //
-// From her existing synthetic documents (read only, values copied as they are):
-//   * Hôpital Valmorin, emergency visit, lab report: CRP 3 mg/L, sample
-//     2026-08-24 19:48 +02:00, issued 20:41 +02:00
-//     (Hackaton 2026: out/andrea/paris-lab.json, LOINC 1988-5). The document
-//     also has a reference range and an interpretation; they are left out here
-//     on purpose (no interpretation in this API).
-// No other CRP exists in Andrea's documents (Nordvik, Norrskogen, the Paris
-// discharge summary) or in the Hälsa+ demo seed.
+// The lab, "Laboratoire Belvasse" in Paris, is fictional (not a real company).
+// She lives in Paris (temporary address since 2026-02-01, no end date in her
+// documents), so every sample is taken there.
 //
-// Generated for dates without any document (sparse: care contacts and planned
-// follow-ups only):
-//   * 2026-09-10 and 2026-10-20, Hôpital Valmorin: follow-up after discharge in Paris.
-//   * 2026-12-15, Vårdcentralen Norrskogen: planned visit in Uppsala. Reported
-//     as "<5" mg/L (comparator), the way a lab reports a value under its limit.
+// Roughly monthly from spring; none in July (the decline) and none during the
+// hospital stay 2026-08-24 to 08-27. The hospital's own lab results stay in
+// the hospital documents and are not part of this series. A few after
+// discharge, and two in December that are only served with a later asOf.
+//
+// The lab reports a value under its limit as "<5" mg/L (comparator), the way
+// a standard CRP method does; other values are whole numbers.
+
+export const CRP_LAB = { name: 'Laboratoire Belvasse', city: 'Paris' };
 
 export interface LabResult {
+  /** Sample time (UTC). The Paris local time is in the comment. */
   sampled: string;
   issued: string;
-  provider: string;
   value: number;
   comparator?: '<' | '<=' | '>' | '>=';
-  /** Where the value comes from (not served by the API). */
-  origin: 'document' | 'generated';
 }
 
 export const CRP_RESULTS: LabResult[] = [
-  { sampled: '2026-08-24T17:48:00Z', issued: '2026-08-24T18:41:00Z', provider: 'Hôpital Valmorin', value: 3, origin: 'document' },
-  { sampled: '2026-09-10T06:20:00Z', issued: '2026-09-10T09:05:00Z', provider: 'Hôpital Valmorin', value: 2, origin: 'generated' },
-  { sampled: '2026-10-20T06:35:00Z', issued: '2026-10-20T08:50:00Z', provider: 'Hôpital Valmorin', value: 4, origin: 'generated' },
-  { sampled: '2026-12-15T07:10:00Z', issued: '2026-12-15T12:30:00Z', provider: 'Vårdcentralen Norrskogen', value: 5, comparator: '<', origin: 'generated' },
+  { sampled: '2026-03-17T07:10:00Z', issued: '2026-03-17T14:40:00Z', value: 5, comparator: '<' }, // 08:10 Paris
+  { sampled: '2026-04-15T06:20:00Z', issued: '2026-04-15T14:05:00Z', value: 5, comparator: '<' }, // 08:20
+  { sampled: '2026-05-19T06:05:00Z', issued: '2026-05-19T13:30:00Z', value: 8 }, // 08:05
+  { sampled: '2026-06-23T06:40:00Z', issued: '2026-06-23T15:10:00Z', value: 5, comparator: '<' }, // 08:40
+  { sampled: '2026-08-04T07:15:00Z', issued: '2026-08-04T14:45:00Z', value: 6 }, // 09:15
+  { sampled: '2026-09-22T06:15:00Z', issued: '2026-09-22T13:20:00Z', value: 5, comparator: '<' }, // 08:15
+  { sampled: '2026-10-20T06:30:00Z', issued: '2026-10-20T14:00:00Z', value: 7 }, // 08:30
+  { sampled: '2026-11-17T07:10:00Z', issued: '2026-11-17T13:55:00Z', value: 5, comparator: '<' }, // 08:10
+  { sampled: '2026-12-01T07:20:00Z', issued: '2026-12-01T14:10:00Z', value: 5, comparator: '<' }, // 08:20
+  { sampled: '2026-12-15T07:15:00Z', issued: '2026-12-15T14:35:00Z', value: 6 }, // 08:15
 ];

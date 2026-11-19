@@ -8,8 +8,8 @@ info:
     Nordic Hackathon 2026 scenario. No real person is described.
 
     The API serves Andrea's own measurements in Hälsa+, the patient app: values from her
-    devices, her self-ratings in the app, and lab results she has imported from her care
-    providers.
+    devices, her self-ratings in the app, and CRP results from an external lab she visits on
+    her own initiative (Laboratoire Belvasse in Paris, fictional; invented for the demo).
 
     ## Rules for content
     - **No clinical interpretation.** There are no scores, no high/low/normal flags, no
@@ -385,7 +385,7 @@ components:
         | `bmi` | `value` kg/m²; components `weight` (kg) and `height` (cm) it is calculated from | `effectiveDateTime` | scale |
         | `sleep` | components `sleep-duration` (min), `awakenings` (count) | `effectivePeriod` = bedtime to wake time | smartwatch |
         | `anxiety`, `stress` | `value` integer 0–10, unit `0–10` | `effectiveDateTime` = when she entered it | Hälsa+ app (patient-reported) |
-        | `crp` | `value` mg/L, optional `comparator` | `effectiveDateTime` = sample time, `issued` | lab at a care provider (`performer`) |
+        | `crp` | `value` mg/L, optional `comparator` | `effectiveDateTime` = sample time, `issued` | external lab she visits on her own initiative (`performer`) |
 
         The self-ratings are Andrea's own 0–10 ratings in the app. They are **not** a validated
         instrument.
@@ -399,11 +399,12 @@ components:
           description: '`preliminary` = a simulated future value, visible only because `asOf` is after the real current time.'
         sourceType:
           type: string
-          enum: [device, patient-reported, care-provider-lab]
+          enum: [device, patient-reported, external-lab]
+          description: '`external-lab` = a lab result from a lab Andrea visits on her own initiative (not a care provider).'
         deviceId: { type: [string, 'null'], description: '`null` for lab results.' }
         performer:
           $ref: '#/components/schemas/Performer'
-          description: Only for lab results. The care provider whose laboratory produced the result.
+          description: Only for lab results. The lab that produced the result.
         effectiveDateTime: { type: string, format: date-time }
         effectivePeriod:
           type: object
@@ -442,10 +443,11 @@ components:
 
     Performer:
       type: object
-      required: [name, type]
+      required: [name, type, city]
       properties:
-        name: { type: string, example: Hôpital Valmorin }
+        name: { type: string, example: Laboratoire Belvasse, description: Fictional lab. }
         type: { const: laboratory }
+        city: { type: string, example: Paris, description: Where the sample was taken. }
 
     Quantity:
       type: object
@@ -518,7 +520,7 @@ components:
         Codes used with `format=fhir` (FHIR R4). Every Observation has `subject` =
         `Patient/{me.id}` with the personal identity number as identifier. Device data has
         `device` = `Device/{deviceId}` with the device's name as `display`. Lab results have
-        `performer` with the care provider's name and an `issued` time.
+        `performer` with the lab's name and an `issued` time.
 
         | type | category | Observation.code | value / components (UCUM) |
         |---|---|---|---|

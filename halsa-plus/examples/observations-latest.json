@@ -97,17 +97,18 @@
       "status": "final"
     },
     {
-      "id": "crp-20261020T063500Z",
+      "id": "crp-20261020T063000Z",
       "type": "crp",
-      "sourceType": "care-provider-lab",
+      "sourceType": "external-lab",
       "deviceId": null,
       "performer": {
-        "name": "Hôpital Valmorin",
-        "type": "laboratory"
+        "name": "Laboratoire Belvasse",
+        "type": "laboratory",
+        "city": "Paris"
       },
-      "effectiveDateTime": "2026-10-20T06:35:00Z",
-      "issued": "2026-10-20T08:50:00Z",
-      "value": 4,
+      "effectiveDateTime": "2026-10-20T06:30:00Z",
+      "issued": "2026-10-20T14:00:00Z",
+      "value": 7,
       "unit": "mg/L",
       "status": "final"
     }

@@ -2,63 +2,168 @@
   "asOf": "2026-12-16T12:00:00Z",
   "items": [
     {
-      "id": "crp-20260824T174800Z",
+      "id": "crp-20260317T071000Z",
       "type": "crp",
-      "sourceType": "care-provider-lab",
+      "sourceType": "external-lab",
       "deviceId": null,
       "performer": {
-        "name": "Hôpital Valmorin",
-        "type": "laboratory"
+        "name": "Laboratoire Belvasse",
+        "type": "laboratory",
+        "city": "Paris"
       },
-      "effectiveDateTime": "2026-08-24T17:48:00Z",
-      "issued": "2026-08-24T18:41:00Z",
-      "value": 3,
-      "unit": "mg/L",
-      "status": "final"
-    },
-    {
-      "id": "crp-20260910T062000Z",
-      "type": "crp",
-      "sourceType": "care-provider-lab",
-      "deviceId": null,
-      "performer": {
-        "name": "Hôpital Valmorin",
-        "type": "laboratory"
-      },
-      "effectiveDateTime": "2026-09-10T06:20:00Z",
-      "issued": "2026-09-10T09:05:00Z",
-      "value": 2,
-      "unit": "mg/L",
-      "status": "final"
-    },
-    {
-      "id": "crp-20261020T063500Z",
-      "type": "crp",
-      "sourceType": "care-provider-lab",
-      "deviceId": null,
-      "performer": {
-        "name": "Hôpital Valmorin",
-        "type": "laboratory"
-      },
-      "effectiveDateTime": "2026-10-20T06:35:00Z",
-      "issued": "2026-10-20T08:50:00Z",
-      "value": 4,
-      "unit": "mg/L",
-      "status": "final"
-    },
-    {
-      "id": "crp-20261215T071000Z",
-      "type": "crp",
-      "sourceType": "care-provider-lab",
-      "deviceId": null,
-      "performer": {
-        "name": "Vårdcentralen Norrskogen",
-        "type": "laboratory"
-      },
-      "effectiveDateTime": "2026-12-15T07:10:00Z",
-      "issued": "2026-12-15T12:30:00Z",
+      "effectiveDateTime": "2026-03-17T07:10:00Z",
+      "issued": "2026-03-17T14:40:00Z",
       "value": 5,
       "comparator": "<",
+      "unit": "mg/L",
+      "status": "final"
+    },
+    {
+      "id": "crp-20260415T062000Z",
+      "type": "crp",
+      "sourceType": "external-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Laboratoire Belvasse",
+        "type": "laboratory",
+        "city": "Paris"
+      },
+      "effectiveDateTime": "2026-04-15T06:20:00Z",
+      "issued": "2026-04-15T14:05:00Z",
+      "value": 5,
+      "comparator": "<",
+      "unit": "mg/L",
+      "status": "final"
+    },
+    {
+      "id": "crp-20260519T060500Z",
+      "type": "crp",
+      "sourceType": "external-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Laboratoire Belvasse",
+        "type": "laboratory",
+        "city": "Paris"
+      },
+      "effectiveDateTime": "2026-05-19T06:05:00Z",
+      "issued": "2026-05-19T13:30:00Z",
+      "value": 8,
+      "unit": "mg/L",
+      "status": "final"
+    },
+    {
+      "id": "crp-20260623T064000Z",
+      "type": "crp",
+      "sourceType": "external-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Laboratoire Belvasse",
+        "type": "laboratory",
+        "city": "Paris"
+      },
+      "effectiveDateTime": "2026-06-23T06:40:00Z",
+      "issued": "2026-06-23T15:10:00Z",
+      "value": 5,
+      "comparator": "<",
+      "unit": "mg/L",
+      "status": "final"
+    },
+    {
+      "id": "crp-20260804T071500Z",
+      "type": "crp",
+      "sourceType": "external-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Laboratoire Belvasse",
+        "type": "laboratory",
+        "city": "Paris"
+      },
+      "effectiveDateTime": "2026-08-04T07:15:00Z",
+      "issued": "2026-08-04T14:45:00Z",
+      "value": 6,
+      "unit": "mg/L",
+      "status": "final"
+    },
+    {
+      "id": "crp-20260922T061500Z",
+      "type": "crp",
+      "sourceType": "external-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Laboratoire Belvasse",
+        "type": "laboratory",
+        "city": "Paris"
+      },
+      "effectiveDateTime": "2026-09-22T06:15:00Z",
+      "issued": "2026-09-22T13:20:00Z",
+      "value": 5,
+      "comparator": "<",
+      "unit": "mg/L",
+      "status": "final"
+    },
+    {
+      "id": "crp-20261020T063000Z",
+      "type": "crp",
+      "sourceType": "external-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Laboratoire Belvasse",
+        "type": "laboratory",
+        "city": "Paris"
+      },
+      "effectiveDateTime": "2026-10-20T06:30:00Z",
+      "issued": "2026-10-20T14:00:00Z",
+      "value": 7,
+      "unit": "mg/L",
+      "status": "final"
+    },
+    {
+      "id": "crp-20261117T071000Z",
+      "type": "crp",
+      "sourceType": "external-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Laboratoire Belvasse",
+        "type": "laboratory",
+        "city": "Paris"
+      },
+      "effectiveDateTime": "2026-11-17T07:10:00Z",
+      "issued": "2026-11-17T13:55:00Z",
+      "value": 5,
+      "comparator": "<",
+      "unit": "mg/L",
+      "status": "final"
+    },
+    {
+      "id": "crp-20261201T072000Z",
+      "type": "crp",
+      "sourceType": "external-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Laboratoire Belvasse",
+        "type": "laboratory",
+        "city": "Paris"
+      },
+      "effectiveDateTime": "2026-12-01T07:20:00Z",
+      "issued": "2026-12-01T14:10:00Z",
+      "value": 5,
+      "comparator": "<",
+      "unit": "mg/L",
+      "status": "preliminary"
+    },
+    {
+      "id": "crp-20261215T071500Z",
+      "type": "crp",
+      "sourceType": "external-lab",
+      "deviceId": null,
+      "performer": {
+        "name": "Laboratoire Belvasse",
+        "type": "laboratory",
+        "city": "Paris"
+      },
+      "effectiveDateTime": "2026-12-15T07:15:00Z",
+      "issued": "2026-12-15T14:35:00Z",
+      "value": 6,
       "unit": "mg/L",
       "status": "preliminary"
     }

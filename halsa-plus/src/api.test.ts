@@ -56,9 +56,13 @@ test('asOf hides what is not available yet; status marks simulated future values
   assert.deepEqual([...statuses].sort(), ['final', 'preliminary']);
   for (const o of ahead.items) assert.equal(o.status, Date.parse(o.effectiveDateTime) <= NOW ? 'final' : 'preliminary');
 
+  // CRP in December is a simulated future value: hidden by default, preliminary when fast-forwarded.
+  const crpNow = await json('/api/v1/observations?type=crp');
+  assert.ok(crpNow.items.every((o: { status: string; issued: string }) => o.status === 'final' && Date.parse(o.issued) <= NOW));
   const crp = await json('/api/v1/observations?type=crp&asOf=2026-12-16T12:00:00Z');
-  const last = crp.items.at(-1);
-  assert.deepEqual([last.comparator, last.value, last.status], ['<', 5, 'preliminary']);
+  const future = crp.items.filter((o: { issued: string }) => Date.parse(o.issued) > NOW);
+  assert.ok(future.length >= 1 && future.every((o: { status: string }) => o.status === 'preliminary'));
+  assert.equal(crp.items.length, crpNow.items.length + future.length);
 });
 
 test('asOf outside the window, unknown types and bad cursors are 400', async () => {
@@ -135,10 +139,10 @@ test('FHIR: a searchset Bundle with LOINC/UCUM, device and performer references'
   assert.equal(bp.subject.identifier.value, '200207252388');
 
   const crp: Body = await (await get('/api/v1/observations?format=fhir&asOf=2026-12-16T12:00:00Z&type=crp')).json();
-  const below = crp.entry.at(-1).resource;
+  const resources = crp.entry.map((e: { resource: unknown }) => e.resource);
+  const below = resources.find((r: { status: string; valueQuantity: { comparator?: string } }) => r.status === 'preliminary' && r.valueQuantity.comparator);
   assert.deepEqual(below.valueQuantity, { comparator: '<', value: 5, unit: 'mg/L', system: 'http://unitsofmeasure.org', code: 'mg/L' });
-  assert.equal(below.performer[0].display, 'Vårdcentralen Norrskogen');
-  assert.equal(below.status, 'preliminary');
+  assert.ok(resources.every((r: { performer: { display: string }[] }) => r.performer[0].display === 'Laboratoire Belvasse'));
 });
 
 test('requests are an empty placeholder; consent validates the decision', async () => {
