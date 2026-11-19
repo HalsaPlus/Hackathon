@@ -4,13 +4,14 @@ import { call } from '../../api.ts';
 import type { ScreenProps } from '../App.tsx';
 import { CheckIcon } from '../icons.tsx';
 import { DAY, formatShort, lanes } from '../model.ts';
+import { HalsaData } from './HalsaData.tsx';
 
 // Step 11: the patient's own reported data next to the clinical summary (IPS)
 // fetched through Health Connect, with a toggle between the two.
 
 type Mode = 'mine' | 'clinical';
 
-function Sparkline({ values, low, high, color }: { values: number[]; low?: number; high?: number; color: string }) {
+export function Sparkline({ values, low, high, color }: { values: number[]; low?: number; high?: number; color: string }) {
   if (values.length < 2) return null;
   const w = 300;
   const h = 56;
@@ -189,7 +190,11 @@ export function HealthScreen({ view, patientGuid, refresh }: ScreenProps) {
         </button>
       </div>
 
-      {mode === 'mine' ? <MyData view={view} /> : <Clinical ips={view.ips} onRefresh={() => void refetch()} refreshing={refreshing} message={message} />}
+      {mode === 'mine' ? (
+        <HalsaData view={view} patientGuid={patientGuid} fallback={<MyData view={view} />} />
+      ) : (
+        <Clinical ips={view.ips} onRefresh={() => void refetch()} refreshing={refreshing} message={message} />
+      )}
 
       {mode === 'mine' && praise && (
         <section className="praise">
