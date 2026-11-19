@@ -3,8 +3,8 @@ import { ConnectionsPage } from './pages/ConnectionsPage.tsx';
 import { PatientPage } from './pages/PatientPage.tsx';
 import { PatientsPage } from './pages/PatientsPage.tsx';
 
-// Routing with the URL hash (#/, #/patient/<guid>, #/anslutning), so the
-// server only ever has to serve index.html.
+// The admin console. Routing with the URL hash (#/, #/patient/<guid>,
+// #/connection), so the server only ever has to serve index.html.
 
 function useHashPath() {
   const read = () => window.location.hash.replace(/^#/, '') || '/';
@@ -23,7 +23,7 @@ function useHashPath() {
 export default function App() {
   const path = useHashPath();
   const patientMatch = /^\/patient\/([^/]+)$/.exec(path);
-  const section = path.startsWith('/anslutning') ? 'connection' : 'patients';
+  const section = path.startsWith('/connection') ? 'connection' : 'patients';
 
   let page;
   if (patientMatch) page = <PatientPage key={patientMatch[1]} guid={decodeURIComponent(patientMatch[1])} />;
@@ -43,21 +43,22 @@ export default function App() {
             </svg>
             MMD
           </a>
-          <nav aria-label="Huvudmeny">
+          <nav aria-label="Main menu">
             <a href="#/" aria-current={section === 'patients' ? 'page' : undefined}>
-              Patienter
+              Patients
             </a>
-            <a href="#/anslutning" aria-current={section === 'connection' ? 'page' : undefined}>
-              Anslutning
+            <a href="#/connection" aria-current={section === 'connection' ? 'page' : undefined}>
+              Connection
             </a>
+            <a href="/app/">Patient app</a>
           </nav>
           <form method="post" action="/logout" className="logout">
-            <button type="submit">Logga ut</button>
+            <button type="submit">Sign out</button>
           </form>
         </div>
       </header>
       <main className="page">{page}</main>
-      <footer className="footer">Bara syntetiska data. PDHC får inte användas med riktiga patientuppgifter.</footer>
+      <footer className="footer">Synthetic data only. PDHC may not be used with real patient data.</footer>
     </>
   );
 }

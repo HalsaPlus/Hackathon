@@ -36,6 +36,17 @@ app.get('/api/health', (_req, res) => {
 // not with a login session, so it is registered before setupAuth().
 setupPushEndpoint(app);
 
+// What a phone needs to install the patient app: the manifest, the icons and
+// the service worker. None of it holds patient data.
+const pwaDir = isProd ? distDir : path.join(root, 'public');
+app.get('/manifest.webmanifest', (_req, res) => {
+  res.type('application/manifest+json').sendFile(path.join(pwaDir, 'manifest.webmanifest'));
+});
+app.get('/sw.js', (_req, res) => {
+  res.set('Cache-Control', 'no-cache').type('text/javascript').sendFile(path.join(pwaDir, 'sw.js'));
+});
+app.use('/icons', express.static(path.join(pwaDir, 'icons'), { maxAge: '1d' }));
+
 // --- Login -----------------------------------------------------------------
 // Everything below this line requires a signed-in session.
 
@@ -56,15 +67,16 @@ app.use('/api', (_req, res) => {
 
 if (isProd) {
   const indexHtml = path.join(distDir, 'index.html');
-  if (!existsSync(indexHtml)) {
-    console.error('dist/index.html is missing. Run "npm run build" before "npm start".');
+  const appHtml = path.join(distDir, 'app', 'index.html');
+  if (!existsSync(indexHtml) || !existsSync(appHtml)) {
+    console.error('dist/ is incomplete. Run "npm run build" before "npm start".');
     process.exit(1);
   }
   app.use('/assets', express.static(path.join(distDir, 'assets'), { immutable: true, maxAge: '1y' }));
   app.use(express.static(distDir));
   app.use((req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') return next();
-    res.sendFile(indexHtml);
+    res.sendFile(req.path.startsWith('/app') ? appHtml : indexHtml);
   });
 } else {
   // In development Vite runs inside this server, so there is one port and

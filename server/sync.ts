@@ -19,7 +19,7 @@ const running = new Set<number>();
 
 function errorMessage(error: unknown) {
   if (error instanceof PdhcError || error instanceof InboundError) return error.message;
-  return error instanceof Error ? `Oväntat fel: ${error.message}` : 'Oväntat fel.';
+  return error instanceof Error ? `Unexpected error: ${error.message}` : 'Unexpected error.';
 }
 
 /**
@@ -29,8 +29,8 @@ function errorMessage(error: unknown) {
  */
 export async function syncConnection(id: number): Promise<{ ok: boolean; message: string }> {
   const connection = getConnection(id);
-  if (!connection) return { ok: false, message: 'Anslutningen finns inte.' };
-  if (running.has(id)) return { ok: false, message: 'En hämtning pågår redan.' };
+  if (!connection) return { ok: false, message: 'The connection does not exist.' };
+  if (running.has(id)) return { ok: false, message: 'A fetch is already running.' };
   running.add(id);
 
   const counts = { created: 0, updated: 0, unchanged: 0, failed: 0 };
@@ -73,12 +73,12 @@ export async function syncConnection(id: number): Promise<{ ok: boolean; message
       since = newestSeen;
     }
     const parts = [
-      counts.created && `${counts.created} nya`,
-      counts.updated && `${counts.updated} ändrade`,
-      counts.unchanged && `${counts.unchanged} oförändrade`,
-      counts.failed && `${counts.failed} misslyckades`,
+      counts.created && `${counts.created} new`,
+      counts.updated && `${counts.updated} changed`,
+      counts.unchanged && `${counts.unchanged} unchanged`,
+      counts.failed && `${counts.failed} failed`,
     ].filter(Boolean);
-    message = parts.length ? `Hämtat: ${parts.join(', ')}.` : 'Inga nya beställningar.';
+    message = parts.length ? `Fetched: ${parts.join(', ')}.` : 'No new requests.';
     ok = counts.failed === 0;
   } catch (error) {
     ok = false;
@@ -112,8 +112,8 @@ export function startPolling(intervalMs: number) {
 export async function acknowledgePush(connection: ConnectionRow, serviceRequestGuid: string, receiptToken: string) {
   try {
     await acknowledge(connection, receiptToken);
-    setAckStatus(serviceRequestGuid, `Kvitterad ${now()}`);
+    setAckStatus(serviceRequestGuid, `Acknowledged ${now()}`);
   } catch (error) {
-    setAckStatus(serviceRequestGuid, `Kvittensen misslyckades: ${errorMessage(error)}`);
+    setAckStatus(serviceRequestGuid, `Acknowledgement failed: ${errorMessage(error)}`);
   }
 }

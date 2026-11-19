@@ -1,6 +1,6 @@
 import type { ConnectionView, InboundLogEntry, PatientSummary, PatientView } from '../shared/types.ts';
 
-async function call<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, body?: unknown): Promise<T> {
+export async function call<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, body?: unknown): Promise<T> {
   const response = await fetch(url, {
     method,
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
@@ -8,18 +8,20 @@ async function call<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, b
     credentials: 'same-origin',
   });
   if (response.status === 401) {
-    window.location.href = '/login';
-    throw new Error('Du är inte inloggad.');
+    const here = window.location.pathname + window.location.search + window.location.hash;
+    window.location.href = `/login?next=${encodeURIComponent(here)}`;
+    throw new Error('You are not signed in.');
   }
   if (response.status === 204) return undefined as T;
   const data = (await response.json().catch(() => ({}))) as { error?: string };
-  if (!response.ok) throw new Error(data.error ?? `Servern svarade med fel ${response.status}.`);
+  if (!response.ok) throw new Error(data.error ?? `The server answered with error ${response.status}.`);
   return data as T;
 }
 
 export interface ConnectionInput {
   name: string;
   baseUrl: string;
+  gatewayUrl?: string;
   providerToken?: string;
   pushSecret?: string | null;
   pollEnabled: boolean;

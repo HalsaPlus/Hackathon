@@ -1,17 +1,23 @@
 import { createHash } from 'node:crypto';
 import type {
   ActivityView,
+  AppView,
   ConnectionView,
   Goal,
   InboundLogEntry,
+  MessageView,
+  ObservationView,
   PatientSummary,
   PatientView,
+  ReportStatus,
   ServiceRequestView,
   Timing,
   Transaction,
 } from '../shared/types.ts';
 import { all, get, now, run, transaction } from './db.ts';
-import type { ParsedDelivery } from './fhir.ts';
+import type { ParsedCarePlan, ParsedDelivery } from './fhir.ts';
+import { parseIps } from './ips.ts';
+import { type CdrOutcome, toCommunication } from './messaging.ts';
 import { DEFAULT_PLAN_DAYS, describeTiming, longestBounds, occurrences } from './schedule.ts';
 
 // Everything that reads or writes the database.
@@ -25,6 +31,7 @@ export interface ConnectionRow {
   name: string;
   base_url: string;
   provider_token: string;
+  gateway_url: string | null;
   push_secret: string | null;
   poll_enabled: number;
   feed_since: string | null;
@@ -37,11 +44,12 @@ export interface ConnectionRow {
   updated_at: string;
 }
 
-interface ServiceRequestRow {
+export interface ServiceRequestRow {
   guid: string;
   connection_id: number | null;
   connection_name: string | null;
   patient_guid: string;
+  seen_at: string | null;
   source: 'push' | 'poll' | 'demo';
   status: string | null;
   intent: string | null;
@@ -62,13 +70,15 @@ interface ServiceRequestRow {
 
 interface CarePlanRow {
   id: number;
+  fhir_id: string | null;
   title: string | null;
   description: string | null;
   status: string | null;
   goals_json: string;
 }
 
-interface ActivityRow {
+export interface ActivityRow {
+  care_plan_id: number;
   activity_key: string;
   title: string;
   description: string | null;
@@ -80,11 +90,21 @@ interface ActivityRow {
 
 // --- Connections -------------------------------------------------------------------
 
+/**
+ * Reports go to gateway.pdhc, not to request.pdhc. When no gateway URL is
+ * set, it is derived from the connection's URL.
+ */
+export function gatewayUrlOf(row: Pick<ConnectionRow, 'gateway_url' | 'base_url'>): string {
+  if (row.gateway_url) return row.gateway_url;
+  return row.base_url.replace('://request.pdhc.se', '://gateway.pdhc.se');
+}
+
 export function toConnectionView(row: ConnectionRow): ConnectionView {
   return {
     id: row.id,
     name: row.name,
     baseUrl: row.base_url,
+    gatewayUrl: gatewayUrlOf(row),
     tokenHint: `…${row.provider_token.slice(-4)}`,
     hasPushSecret: !!row.push_secret,
     pollEnabled: row.poll_enabled === 1,
@@ -159,7 +179,7 @@ export interface StoreOptions {
 }
 
 function checksumOf(parsed: ParsedDelivery) {
-  const content = JSON.stringify([parsed.serviceRequest, parsed.carePlan?.fhir ?? null, parsed.patient.fhir ?? null]);
+  const content = JSON.stringify([parsed.serviceRequest, parsed.carePlans.map((p) => p.fhir), parsed.patient.fhir ?? null]);
   return createHash('sha256').update(content).digest('hex');
 }
 
@@ -170,12 +190,12 @@ function resolvePeriod(parsed: ParsedDelivery) {
   if (!Number.isNaN(givenEnd) && givenEnd > start) {
     return { start: new Date(start).toISOString(), end: new Date(givenEnd).toISOString(), endGiven: true };
   }
-  const timings = parsed.carePlan?.activities.map((a) => a.timing) ?? [];
+  const timings = parsed.carePlans.flatMap((plan) => plan.activities.map((a) => a.timing));
   const length = Math.max(longestBounds(timings), DEFAULT_PLAN_DAYS * DAY);
   return { start: new Date(start).toISOString(), end: new Date(start + length).toISOString(), endGiven: false };
 }
 
-function insertCarePlan(serviceRequestGuid: string, carePlan: NonNullable<ParsedDelivery['carePlan']>) {
+function insertCarePlan(serviceRequestGuid: string, carePlan: ParsedCarePlan) {
   const result = run(
     `INSERT INTO care_plans (service_request_guid, fhir_id, title, description, status, goals_json, fhir_json)
      VALUES (:guid, :fhirId, :title, :description, :status, :goals, :fhir)`,
@@ -301,7 +321,9 @@ export function storeDelivery(parsed: ParsedDelivery, options: StoreOptions): 'c
         values,
       );
     }
-    if (parsed.carePlan) insertCarePlan(parsed.guid, parsed.carePlan);
+    for (const carePlan of parsed.carePlans) insertCarePlan(parsed.guid, carePlan);
+    // The patient sees a new plan as a note in the chat, linking to it.
+    if (!existing) addMessage(parsed.patient.guid, 'system', 'New plan from the care team', parsed.guid, timestamp);
     return existing ? 'updated' : 'created';
   });
 }
@@ -393,7 +415,10 @@ export function listPatients(): PatientSummary[] {
 }
 
 function requestView(row: ServiceRequestRow): ServiceRequestView {
-  const carePlan = get<CarePlanRow>('SELECT * FROM care_plans WHERE service_request_guid = :guid', { guid: row.guid });
+  const carePlans = all<CarePlanRow>('SELECT * FROM care_plans WHERE service_request_guid = :guid ORDER BY id', {
+    guid: row.guid,
+  });
+  const planIdOf = (plan: CarePlanRow) => plan.fhir_id ?? `plan-${plan.id}`;
   const performed = new Map<string, string>();
   for (const p of all<{ activity_key: string; stop_index: number; performed_at: string }>(
     'SELECT activity_key, stop_index, performed_at FROM performances WHERE service_request_guid = :guid',
@@ -404,13 +429,15 @@ function requestView(row: ServiceRequestRow): ServiceRequestView {
 
   const start = new Date(row.period_start);
   const end = new Date(row.period_end);
-  const activities: ActivityView[] = carePlan
-    ? all<ActivityRow>('SELECT * FROM activities WHERE care_plan_id = :id ORDER BY position', { id: carePlan.id }).map(
+  const activities: ActivityView[] = carePlans.flatMap((plan, planIndex) =>
+    all<ActivityRow>('SELECT * FROM activities WHERE care_plan_id = :id ORDER BY position', { id: plan.id }).map(
         (activity) => {
           const timing = JSON.parse(activity.timing_json) as Timing;
           const { dates, truncated } = occurrences(timing, start, end);
           return {
             key: activity.activity_key,
+            planId: planIdOf(plan),
+            planIndex,
             title: activity.title,
             description: activity.description,
             performerType: activity.performer_type,
@@ -426,8 +453,8 @@ function requestView(row: ServiceRequestRow): ServiceRequestView {
             truncated,
           };
         },
-      )
-    : [];
+      ),
+  );
 
   return {
     guid: row.guid,
@@ -445,14 +472,14 @@ function requestView(row: ServiceRequestRow): ServiceRequestView {
     updatedAt: row.updated_at,
     ackStatus: row.ack_status,
     hasGrantToken: !!row.grant_token,
-    carePlan: carePlan
-      ? {
-          title: carePlan.title,
-          description: carePlan.description,
-          status: carePlan.status,
-          goals: JSON.parse(carePlan.goals_json) as Goal[],
-        }
-      : null,
+    seenAt: row.seen_at,
+    carePlans: carePlans.map((plan) => ({
+      id: planIdOf(plan),
+      title: plan.title,
+      description: plan.description,
+      status: plan.status,
+      goals: JSON.parse(plan.goals_json) as Goal[],
+    })),
     activities,
   };
 }
@@ -482,4 +509,227 @@ export function getPatientView(guid: string): PatientView | undefined {
     },
     requests,
   };
+}
+
+// --- The patient app -------------------------------------------------------------------
+
+export function getServiceRequestRow(guid: string): ServiceRequestRow | undefined {
+  return get<ServiceRequestRow>(
+    `SELECT s.*, c.name AS connection_name FROM service_requests s
+     LEFT JOIN connections c ON c.id = s.connection_id WHERE s.guid = :guid`,
+    { guid },
+  );
+}
+
+/** One activity in a request, with the id of the care plan it belongs to. */
+export function getActivity(serviceRequestGuid: string, activityKey: string) {
+  return get<ActivityRow & { plan_fhir_id: string | null; plan_row_id: number }>(
+    `SELECT a.*, c.fhir_id AS plan_fhir_id, c.id AS plan_row_id FROM activities a
+     JOIN care_plans c ON c.id = a.care_plan_id
+     WHERE c.service_request_guid = :guid AND a.activity_key = :key`,
+    { guid: serviceRequestGuid, key: activityKey },
+  );
+}
+
+export function markSeen(serviceRequestGuid: string) {
+  run('UPDATE service_requests SET seen_at = COALESCE(seen_at, :at) WHERE guid = :guid', { guid: serviceRequestGuid, at: now() });
+}
+
+export function addMessage(
+  patientGuid: string,
+  sender: MessageView['sender'],
+  text: string,
+  serviceRequestGuid: string | null = null,
+  at: string = now(),
+): MessageView {
+  const result = run(
+    `INSERT INTO messages (patient_guid, sender, text, service_request_guid, created_at)
+     VALUES (:patient, :sender, :text, :sr, :at)`,
+    { patient: patientGuid, sender, text: text.slice(0, 2000), sr: serviceRequestGuid, at },
+  );
+  const id = Number(result.lastInsertRowid);
+  // Keep every message as a FHIR R5 Communication too.
+  const communication = toCommunication({ id, patientGuid, sender, text, serviceRequestGuid, createdAt: at });
+  run('UPDATE messages SET fhir_json = :fhir WHERE id = :id', { id, fhir: JSON.stringify(communication) });
+  return { id, sender, text, serviceRequestGuid, createdAt: at, cdrStatus: null };
+}
+
+export function setMessageCdrOutcome(id: number, outcome: CdrOutcome) {
+  run('UPDATE messages SET cdr_status = :status, cdr_message = :message WHERE id = :id', {
+    id,
+    status: outcome.status,
+    message: outcome.message,
+  });
+}
+
+/** The chat as FHIR Communications, for the control tower's dashboard. */
+export function listCommunications(patientGuid: string | null) {
+  const rows = all<{ fhir_json: string | null }>(
+    `SELECT fhir_json FROM messages WHERE fhir_json IS NOT NULL ${patientGuid ? 'AND patient_guid = :p' : ''}
+     ORDER BY created_at DESC LIMIT 500`,
+    patientGuid ? { p: patientGuid } : {},
+  );
+  return rows.map((row) => JSON.parse(row.fhir_json!) as unknown);
+}
+
+export interface NewObservation {
+  patientGuid: string;
+  serviceRequestGuid: string;
+  activityKey: string;
+  stopIndex: number | null;
+  name: string;
+  transactionGuid: string | null;
+  conceptGuid: string | null;
+  value: string;
+  unit: string | null;
+  recordedAt: string;
+  device: string | null;
+  carePlanRef: string | null;
+  planDay: number | null;
+  note: string | null;
+  reportStatus: ReportStatus;
+  reportMessage: string | null;
+  confirmed: boolean;
+}
+
+/** The source app in every stamp. The PAT tells PDHC the same thing on its side. */
+export const SOURCE_APP = 'MMD';
+
+export function insertObservation(o: NewObservation): number {
+  const result = run(
+    `INSERT INTO observations (patient_guid, service_request_guid, activity_key, stop_index, name, transaction_guid,
+       concept_guid, value, unit, recorded_at, patient_reported, source_app, device, care_plan_ref, plan_day, note,
+       report_status, report_message, reported_at, confirmed)
+     VALUES (:patient, :sr, :key, :stop, :name, :tx, :concept, :value, :unit, :at, 1, :app, :device, :plan, :day, :note,
+       :status, :message, :reportedAt, :confirmed)`,
+    {
+      patient: o.patientGuid,
+      sr: o.serviceRequestGuid,
+      key: o.activityKey,
+      stop: o.stopIndex,
+      name: o.name,
+      tx: o.transactionGuid,
+      concept: o.conceptGuid,
+      value: o.value,
+      unit: o.unit,
+      at: o.recordedAt,
+      app: SOURCE_APP,
+      device: o.device,
+      plan: o.carePlanRef,
+      day: o.planDay,
+      note: o.note,
+      status: o.reportStatus,
+      message: o.reportMessage,
+      reportedAt: o.reportStatus === 'pending' ? null : o.recordedAt,
+      confirmed: o.confirmed,
+    },
+  );
+  return Number(result.lastInsertRowid);
+}
+
+export function setReportOutcome(ids: number[], status: ReportStatus, message: string, confirmed: boolean) {
+  for (const id of ids) {
+    run(
+      `UPDATE observations SET report_status = :status, report_message = :message, reported_at = :at, confirmed = :confirmed
+       WHERE id = :id`,
+      { id, status, message, at: now(), confirmed },
+    );
+  }
+}
+
+interface ObservationRow {
+  id: number;
+  service_request_guid: string;
+  activity_key: string;
+  stop_index: number | null;
+  name: string;
+  value: string;
+  unit: string | null;
+  recorded_at: string;
+  patient_reported: number;
+  source_app: string;
+  device: string | null;
+  care_plan_ref: string | null;
+  plan_day: number | null;
+  report_status: ReportStatus;
+  report_message: string | null;
+  confirmed: number;
+}
+
+function toObservationView(row: ObservationRow): ObservationView {
+  return {
+    id: row.id,
+    serviceRequestGuid: row.service_request_guid,
+    activityKey: row.activity_key,
+    stopIndex: row.stop_index,
+    name: row.name,
+    value: row.value,
+    unit: row.unit,
+    recordedAt: row.recorded_at,
+    patientReported: row.patient_reported === 1,
+    sourceApp: row.source_app,
+    device: row.device,
+    carePlanRef: row.care_plan_ref,
+    planDay: row.plan_day,
+    reportStatus: row.report_status,
+    reportMessage: row.report_message,
+    confirmed: row.confirmed === 1,
+  };
+}
+
+export function getObservations(ids: number[]): ObservationView[] {
+  return ids
+    .map((id) => get<ObservationRow>('SELECT * FROM observations WHERE id = :id', { id }))
+    .filter((row): row is ObservationRow => !!row)
+    .map(toObservationView);
+}
+
+/** Stores the patient's latest IPS, fetched through Health Connect (or synthetic in the demo). */
+export function saveIps(patientGuid: string, bundle: unknown, source: string, synthetic: boolean) {
+  run(
+    `INSERT INTO ips_documents (patient_guid, source, synthetic, bundle_json, fetched_at)
+     VALUES (:patient, :source, :synthetic, :bundle, :at)
+     ON CONFLICT (patient_guid) DO UPDATE SET source = excluded.source, synthetic = excluded.synthetic,
+       bundle_json = excluded.bundle_json, fetched_at = excluded.fetched_at`,
+    { patient: patientGuid, source, synthetic, bundle: JSON.stringify(bundle), at: now() },
+  );
+}
+
+/** Removes what the demo seeded for a patient, so the demo can be recreated with fresh dates. */
+export function clearPatientAppData(patientGuid: string) {
+  run('DELETE FROM observations WHERE patient_guid = :p', { p: patientGuid });
+  run('DELETE FROM messages WHERE patient_guid = :p', { p: patientGuid });
+  run('DELETE FROM ips_documents WHERE patient_guid = :p', { p: patientGuid });
+}
+
+/** Everything the patient app shows, in one call. */
+export function getAppView(patientGuid: string): AppView | undefined {
+  const view = getPatientView(patientGuid);
+  if (!view) return undefined;
+  const since = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString();
+  const observations = all<ObservationRow>(
+    'SELECT * FROM observations WHERE patient_guid = :p AND recorded_at >= :since ORDER BY recorded_at',
+    { p: patientGuid, since },
+  ).map(toObservationView);
+  const ipsRow = get<{ source: string; synthetic: number; bundle_json: string; fetched_at: string }>(
+    'SELECT source, synthetic, bundle_json, fetched_at FROM ips_documents WHERE patient_guid = :p',
+    { p: patientGuid },
+  );
+  const ips = ipsRow ? parseIps(JSON.parse(ipsRow.bundle_json), ipsRow.source, ipsRow.synthetic === 1, ipsRow.fetched_at) : null;
+  const messages: MessageView[] = all<{
+    id: number;
+    sender: MessageView['sender'];
+    text: string;
+    service_request_guid: string | null;
+    created_at: string;
+    cdr_status: MessageView['cdrStatus'];
+  }>('SELECT * FROM messages WHERE patient_guid = :p ORDER BY created_at, id', { p: patientGuid }).map((row) => ({
+    id: row.id,
+    sender: row.sender,
+    text: row.text,
+    serviceRequestGuid: row.service_request_guid,
+    createdAt: row.created_at,
+    cdrStatus: row.cdr_status,
+  }));
+  return { patient: view.patient, requests: view.requests, observations, ips, messages };
 }

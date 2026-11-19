@@ -91,16 +91,16 @@ export function occurrences(timing: Timing, planStart: Date, planEnd: Date): { d
   }
 }
 
-// --- In words (Swedish) --------------------------------------------------------
+// --- In words ----------------------------------------------------------------------
 
-const UNIT_WORDS: Record<PeriodUnit, { one: string; many: string; per: string }> = {
-  s: { one: 'sekund', many: 'sekunder', per: 'sekund' },
-  min: { one: 'minut', many: 'minuter', per: 'minut' },
-  h: { one: 'timme', many: 'timmar', per: 'timme' },
-  d: { one: 'dag', many: 'dagar', per: 'dag' },
-  wk: { one: 'vecka', many: 'veckor', per: 'vecka' },
-  mo: { one: 'månad', many: 'månader', per: 'månad' },
-  a: { one: 'år', many: 'år', per: 'år' },
+const UNIT_WORDS: Record<PeriodUnit, { one: string; many: string; a: string }> = {
+  s: { one: 'second', many: 'seconds', a: 'a second' },
+  min: { one: 'minute', many: 'minutes', a: 'a minute' },
+  h: { one: 'hour', many: 'hours', a: 'an hour' },
+  d: { one: 'day', many: 'days', a: 'a day' },
+  wk: { one: 'week', many: 'weeks', a: 'a week' },
+  mo: { one: 'month', many: 'months', a: 'a month' },
+  a: { one: 'year', many: 'years', a: 'a year' },
 };
 
 function amount(value: number, unit: PeriodUnit | undefined) {
@@ -109,29 +109,28 @@ function amount(value: number, unit: PeriodUnit | undefined) {
 }
 
 function times(frequency: number) {
-  if (frequency === 1) return 'En gång';
-  if (frequency === 2) return 'Två gånger';
-  if (frequency === 3) return 'Tre gånger';
-  return `${frequency} gånger`;
+  if (frequency === 1) return 'Once';
+  if (frequency === 2) return 'Twice';
+  return `${frequency} times`;
 }
 
 export function describeTiming(timing: Timing): string {
   switch (timing.kind) {
     case 'unscheduled':
-      return 'Inget schema angivet';
+      return 'No schedule given';
     case 'events': {
       const n = timing.events?.length ?? 0;
-      return n === 1 ? 'Ett bestämt tillfälle' : `${n} bestämda tillfällen`;
+      return n === 1 ? 'One set occasion' : `${n} set occasions`;
     }
     case 'once':
-      return timing.offsetValue ? `En gång, inom ${amount(timing.offsetValue, timing.offsetUnit)}` : 'En gång';
+      return timing.offsetValue ? `Once, within ${amount(timing.offsetValue, timing.offsetUnit)}` : 'Once';
     case 'repeat': {
       const unit = timing.periodUnit ?? 'd';
       const period = timing.period ?? 1;
-      const every = period === 1 ? `per ${UNIT_WORDS[unit].per}` : `var ${period}:e ${UNIT_WORDS[unit].one}`;
+      const every = period === 1 ? UNIT_WORDS[unit].a : `every ${period} ${UNIT_WORDS[unit].many}`;
       let result = `${times(timing.frequency ?? 1)} ${every}`;
-      if (timing.boundsValue) result += ` i ${amount(timing.boundsValue, timing.boundsUnit)}`;
-      if (timing.count) result += `, högst ${timing.count} gånger`;
+      if (timing.boundsValue) result += ` for ${amount(timing.boundsValue, timing.boundsUnit)}`;
+      if (timing.count) result += `, at most ${timing.count} times`;
       return result;
     }
   }

@@ -25,7 +25,7 @@ function Today({ request, busy, onDone }: { request: ServiceRequestView; busy: b
   if (due.length === 0) return null;
   return (
     <section className="today" aria-labelledby={`today-${request.guid}`}>
-      <h3 id={`today-${request.guid}`}>I dag</h3>
+      <h3 id={`today-${request.guid}`}>Today</h3>
       <ul>
         {due.map(({ activity, index, stop }) => (
           <li key={activity.key} className={stop!.performedAt ? 'is-done' : undefined}>
@@ -34,10 +34,10 @@ function Today({ request, busy, onDone }: { request: ServiceRequestView; busy: b
             </span>
             <span className="today-title">{activity.title}</span>
             {stop!.performedAt ? (
-              <span className="today-done">Klart</span>
+              <span className="today-done">Done</span>
             ) : (
               <button type="button" className="button" disabled={busy} onClick={() => onDone(activity.key, stop!)}>
-                Markera som utförd
+                Mark as done
               </button>
             )}
           </li>
@@ -51,31 +51,35 @@ function LineList({ request }: { request: ServiceRequestView }) {
   const today = startOfDay(Date.now());
   return (
     <section aria-labelledby={`lines-${request.guid}`}>
-      <h3 id={`lines-${request.guid}`}>Linjerna</h3>
+      <h3 id={`lines-${request.guid}`}>The lines</h3>
       <ol className="line-list">
         {request.activities.map((activity, index) => {
           const p = progress(activity, today);
           const next = nextStop(activity, today);
+          const plan = request.carePlans.length > 1 ? request.carePlans[activity.planIndex]?.title : null;
           return (
             <li key={activity.key}>
               <span className="line-badge" style={{ background: lineColor(index) }} aria-hidden="true">
                 {index + 1}
               </span>
               <div className="line-info">
-                <div className="line-title">{activity.title}</div>
+                <div className="line-title">
+                  {activity.title}
+                  {plan && <span className="muted"> · {plan}</span>}
+                </div>
                 <div className="line-meta">
                   {activity.schedule}
-                  {next ? ` · nästa ${Date.parse(next.dueAt) < today + DAY ? 'i dag' : formatShort(next.dueAt)}` : ''}
+                  {next ? ` · next ${Date.parse(next.dueAt) < today + DAY ? 'today' : formatShort(next.dueAt)}` : ''}
                 </div>
                 {p.total > 0 && (
-                  <div className="meter" aria-label={`${p.done} av ${p.total} utförda`}>
+                  <div className="meter" aria-label={`${p.done} of ${p.total} done`}>
                     <span style={{ width: `${(p.done / p.total) * 100}%`, background: lineColor(index) }} />
                   </div>
                 )}
                 <div className="line-meta">
                   {p.total === 0
-                    ? 'Inga hållplatser: vårdplanen anger inget schema.'
-                    : `${p.done} av ${p.total} utförda${p.missed ? `, ${p.missed} ${p.missed === 1 ? 'missad' : 'missade'}` : ''}`}
+                    ? 'No stops: the care plan gives no schedule.'
+                    : `${p.done} of ${p.total} done${p.missed ? `, ${p.missed} missed` : ''}`}
                 </div>
               </div>
             </li>
@@ -86,7 +90,7 @@ function LineList({ request }: { request: ServiceRequestView }) {
   );
 }
 
-function RequestCard({ request, onChanged }: { request: ServiceRequestView; onChanged: () => Promise<void> }) {
+function RequestCard({ request, patientGuid, onChanged }: { request: ServiceRequestView; patientGuid: string; onChanged: () => Promise<void> }) {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +102,7 @@ function RequestCard({ request, onChanged }: { request: ServiceRequestView; onCh
       await api.setPerformed(request.guid, activityKey, stop.index, performed);
       await onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Det gick inte att spara.');
+      setError(e instanceof Error ? e.message : 'Could not save.');
     } finally {
       setBusy(false);
     }
@@ -125,31 +129,38 @@ function RequestCard({ request, onChanged }: { request: ServiceRequestView; onCh
     }
   }
 
-  const goals = request.carePlan?.goals ?? [];
+  const goals = request.carePlans.flatMap((plan) => plan.goals);
+  const single = request.carePlans.length === 1 ? request.carePlans[0] : null;
   return (
     <article className="card request">
       <header className="request-header">
         <div>
-          <h2>{request.title ?? request.carePlan?.title ?? 'Beställning utan titel'}</h2>
-          {request.carePlan?.description && <p className="lead">{request.carePlan.description}</p>}
+          <h2>{request.title ?? single?.title ?? 'Request without a title'}</h2>
+          {single?.description && <p className="lead">{single.description}</p>}
+          {request.carePlans.length > 1 && (
+            <p className="lead">{request.carePlans.map((p) => p.title).filter(Boolean).join(' · ')}</p>
+          )}
+          <p style={{ margin: '0.5rem 0 0' }}>
+            <a href={`/app/?patient=${encodeURIComponent(patientGuid)}`}>Open in the patient app →</a>
+          </p>
         </div>
         <dl className="request-facts">
           <div>
             <dt>Period</dt>
             <dd>
               {formatRange(Date.parse(request.periodStart), Date.parse(request.periodEnd))}
-              {!request.periodEndGiven && <span className="muted"> (slutdatum saknas, visar 12 veckor)</span>}
+              {!request.periodEndGiven && <span className="muted"> (no end date given, showing 12 weeks)</span>}
             </dd>
           </div>
           <div>
-            <dt>Källa</dt>
+            <dt>Source</dt>
             <dd>
               {sourceLabel(request.source)}
               {request.connectionName ? `, ${request.connectionName}` : ''}
             </dd>
           </div>
           <div>
-            <dt>Mottagen</dt>
+            <dt>Received</dt>
             <dd>{formatDateTime(request.receivedAt)}</dd>
           </div>
           {request.status && (
@@ -165,7 +176,7 @@ function RequestCard({ request, onChanged }: { request: ServiceRequestView; onCh
 
       {goals.length > 0 && (
         <div className="goals">
-          <span className="goals-label">Mål</span>
+          <span className="goals-label">Goals</span>
           <ul>
             {goals.map((goal) => (
               <li key={goal.text}>
@@ -178,7 +189,7 @@ function RequestCard({ request, onChanged }: { request: ServiceRequestView; onCh
       )}
 
       {request.activities.length === 0 ? (
-        <p className="empty">Beställningen har ingen vårdplan med aktiviteter att rita.</p>
+        <p className="empty">The request has no care plan with activities to draw.</p>
       ) : (
         <MetroMap
           request={request}
@@ -215,7 +226,7 @@ function RequestCard({ request, onChanged }: { request: ServiceRequestView; onCh
               onClose={() => setSelection(null)}
             />
           ) : (
-            <div className="panel panel-empty">Välj en hållplats på kartan för att se vad som ska göras.</div>
+            <div className="panel panel-empty">Choose a stop on the map to see what to do.</div>
           )}
         </div>
       </div>
@@ -232,7 +243,7 @@ export function PatientPage({ guid }: { guid: string }) {
       setView(await api.patient(guid));
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Det gick inte att hämta patienten.');
+      setError(e instanceof Error ? e.message : 'Could not load the patient.');
     }
   }, [guid]);
 
@@ -241,25 +252,25 @@ export function PatientPage({ guid }: { guid: string }) {
   }, [load]);
 
   if (error) return <p className="error">{error}</p>;
-  if (!view) return <p className="muted">Hämtar …</p>;
+  if (!view) return <p className="muted">Loading …</p>;
 
   const { patient } = view;
   return (
     <>
       <a href="#/" className="back">
-        ← Alla patienter
+        ← All patients
       </a>
       <header className="patient-header">
-        <h1>{patient.displayName ?? 'Patient utan namn'}</h1>
+        <h1>{patient.displayName ?? 'Patient without a name'}</h1>
         <p className="muted">
-          {patient.birthDate && <>Född {patient.birthDate} · </>}
+          {patient.birthDate && <>Born {patient.birthDate} · </>}
           <span className="mono">{patient.guid}</span>
         </p>
       </header>
       {view.requests.map((request) => (
-        <RequestCard key={request.guid} request={request} onChanged={load} />
+        <RequestCard key={request.guid} request={request} patientGuid={patient.guid} onChanged={load} />
       ))}
-      <p className="muted small">Uppdaterad {formatLong(Date.now())}.</p>
+      <p className="muted small">Updated {formatLong(Date.now())}.</p>
     </>
   );
 }

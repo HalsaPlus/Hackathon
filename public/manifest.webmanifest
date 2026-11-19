@@ -1,0 +1,17 @@
+{
+  "name": "MMD – My care plan",
+  "short_name": "MMD",
+  "description": "Your care plan as a metro map, your measurements and your chat with the care team.",
+  "lang": "en",
+  "start_url": "/app/",
+  "scope": "/app/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#181144",
+  "theme_color": "#181144",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

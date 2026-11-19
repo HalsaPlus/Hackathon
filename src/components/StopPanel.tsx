@@ -16,7 +16,7 @@ interface Props {
 
 function range(min: number | undefined, max: number | undefined, unit: string | undefined) {
   if (min === undefined && max === undefined) return null;
-  const text = min !== undefined && max !== undefined ? `${min}–${max}` : min !== undefined ? `minst ${min}` : `högst ${max}`;
+  const text = min !== undefined && max !== undefined ? `${min}–${max}` : min !== undefined ? `at least ${min}` : `at most ${max}`;
   return unit ? `${text} ${unit}` : text;
 }
 
@@ -28,15 +28,15 @@ function StopRow({ stop, busy, onToggle }: { stop: Stop; busy: boolean; onToggle
     <li className={`stop-row state-${state}`}>
       <span className="stop-row-date">{formatLong(stop.dueAt)}</span>
       <span className="stop-row-state">
-        {stop.performedAt ? `Utförd ${formatDateTime(stop.performedAt)}` : STATE_LABEL[state]}
+        {stop.performedAt ? `Done ${formatDateTime(stop.performedAt)}` : STATE_LABEL[state]}
       </span>
       {stop.performedAt ? (
         <button type="button" className="button subtle" disabled={busy} onClick={() => onToggle(stop, false)}>
-          Ångra
+          Undo
         </button>
       ) : (
         <button type="button" className="button" disabled={busy || future} onClick={() => onToggle(stop, true)}>
-          Markera som utförd
+          Mark as done
         </button>
       )}
     </li>
@@ -50,18 +50,18 @@ function Activity({ activity }: { activity: ActivityView }) {
       {activity.description && <p className="panel-description">{activity.description}</p>}
       <dl className="facts">
         <div>
-          <dt>Hur ofta</dt>
+          <dt>How often</dt>
           <dd>{activity.schedule}</dd>
         </div>
         {performer && (
           <div>
-            <dt>Vem</dt>
+            <dt>Who</dt>
             <dd>{performer}</dd>
           </div>
         )}
         {activity.status && (
           <div>
-            <dt>Status i vårdplanen</dt>
+            <dt>Status in the care plan</dt>
             <dd>
               <code>{activity.status}</code>
             </dd>
@@ -70,7 +70,7 @@ function Activity({ activity }: { activity: ActivityView }) {
       </dl>
       {activity.transactions.length > 0 && (
         <>
-          <h4>Det här registreras</h4>
+          <h4>What is recorded</h4>
           <ul className="transactions">
             {activity.transactions.map((t) => (
               <li key={t.transactionGuid ?? t.conceptGuid ?? t.name}>
@@ -99,23 +99,22 @@ export function StopPanel({ line, station, busy, onToggle, onClose }: Props) {
           <h3 id="panel-title">{line.activity.title}</h3>
           <p className="panel-when">
             {station.label}
-            {grouped && ` · ${station.doneCount} av ${station.stops.length} utförda`}
+            {grouped && ` · ${station.doneCount} of ${station.stops.length} done`}
           </p>
         </div>
-        <button type="button" className="icon-button" onClick={onClose} aria-label="Stäng">
+        <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
           ×
         </button>
       </header>
       <Activity activity={line.activity} />
-      <h4>{grouped ? 'Hållplatserna' : 'Hållplatsen'}</h4>
+      <h4>{grouped ? 'The stops' : 'The stop'}</h4>
       <ul className="stop-rows">
         {station.stops.map((stop) => (
           <StopRow key={stop.index} stop={stop} busy={busy} onToggle={onToggle} />
         ))}
       </ul>
       <p className="panel-note">
-        Utförda hållplatser sparas bara i appen än så länge. Att rapportera mätvärden till PDHC (gateway.pdhc) kommer i ett
-        senare steg.
+        Stops marked as done here are kept in MMD. Values reported in the patient app are also sent to PDHC (gateway.pdhc).
       </p>
     </section>
   );

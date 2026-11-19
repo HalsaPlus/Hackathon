@@ -19,7 +19,7 @@ export function PatientsPage() {
       const view = await api.createDemo();
       window.location.hash = `#/patient/${view.patient.guid}`;
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Det gick inte att skapa exemplet.');
+      setError(e instanceof Error ? e.message : 'Could not create the demo.');
       setBusy(false);
     }
   };
@@ -28,11 +28,11 @@ export function PatientsPage() {
     <>
       <header className="page-header">
         <div>
-          <h1>Patienter</h1>
-          <p className="lead">Patienter med en vårdplan från PDHC. Välj en patient för att se planen som en tunnelbanekarta.</p>
+          <h1>Patients</h1>
+          <p className="lead">Patients with a care plan from PDHC. Choose a patient to see the plan as a metro map.</p>
         </div>
         <button type="button" className="button secondary" onClick={() => void createDemo()} disabled={busy}>
-          {busy ? 'Skapar …' : 'Skapa exempelbeställning'}
+          {busy ? 'Creating …' : 'Create demo request'}
         </button>
       </header>
 
@@ -43,14 +43,14 @@ export function PatientsPage() {
       )}
 
       {patients === null ? (
-        <p className="muted">Hämtar …</p>
+        <p className="muted">Loading …</p>
       ) : patients.length === 0 ? (
         <div className="card empty-state">
-          <h2>Inga beställningar ännu</h2>
+          <h2>No requests yet</h2>
           <p>
-            Beställningar kommer hit när PDHC pushar dem eller när appen hämtar dem. Lägg upp en{' '}
-            <a href="#/anslutning">anslutning</a> med URL och token, eller skapa en exempelbeställning med syntetiska data
-            för att se hur det ser ut.
+            Requests arrive here when PDHC pushes them or when the app fetches them. Add a{' '}
+            <a href="#/connection">connection</a> with URL and token, or create a demo request with synthetic data to see
+            what it looks like.
           </p>
         </div>
       ) : (
@@ -58,12 +58,12 @@ export function PatientsPage() {
           {patients.map((patient) => (
             <li key={patient.guid}>
               <a href={`#/patient/${patient.guid}`} className="card patient-row">
-                <span className="patient-name">{patient.displayName ?? 'Patient utan namn'}</span>
+                <span className="patient-name">{patient.displayName ?? 'Patient without a name'}</span>
                 <span className="muted">
-                  {patient.latestRequestTitle ?? 'Beställning utan titel'}
-                  {patient.requestCount > 1 ? ` och ${patient.requestCount - 1} till` : ''}
+                  {patient.latestRequestTitle ?? 'Request without a title'}
+                  {patient.requestCount > 1 ? ` and ${patient.requestCount - 1} more` : ''}
                 </span>
-                <span className="muted small">Senast ändrad {formatDateTime(patient.updatedAt)}</span>
+                <span className="muted small">Last changed {formatDateTime(patient.updatedAt)}</span>
               </a>
             </li>
           ))}

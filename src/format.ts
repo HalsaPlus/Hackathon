@@ -1,4 +1,4 @@
-// Dates in Swedish, in the viewer's own time zone.
+// Dates in English, in the viewer's own time zone.
 
 export const DAY = 24 * 60 * 60 * 1000;
 
@@ -8,11 +8,11 @@ export function startOfDay(time: number) {
   return date.getTime();
 }
 
-const short = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short' });
-const shortWithYear = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' });
-const long = new Intl.DateTimeFormat('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' });
-const dateTime = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-const month = new Intl.DateTimeFormat('sv-SE', { month: 'short' });
+const short = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
+const shortWithYear = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const long = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+const dateTime = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const month = new Intl.DateTimeFormat('en-GB', { month: 'short' });
 
 export const formatShort = (time: number | string) => short.format(new Date(time));
 export const formatShortYear = (time: number | string) => shortWithYear.format(new Date(time));
@@ -40,9 +40,9 @@ export function isoWeek(time: number) {
 }
 
 const PERFORMERS: Record<string, string> = {
-  patient: 'Patienten',
-  practitioner: 'Vårdpersonal',
-  relatedperson: 'Närstående',
+  patient: 'The patient',
+  practitioner: 'Care staff',
+  relatedperson: 'A relative',
 };
 
 export function performerLabel(value: string | null) {
@@ -51,12 +51,12 @@ export function performerLabel(value: string | null) {
 }
 
 const REQUIREMENTS: Record<string, string> = {
-  required: 'Obligatorisk',
-  recommended: 'Rekommenderad',
-  optional: 'Valfri',
+  required: 'Required',
+  recommended: 'Recommended',
+  optional: 'Optional',
 };
 
 export const requirementLabel = (value: string | undefined) => (value ? (REQUIREMENTS[value] ?? value) : null);
 
-const SOURCES = { push: 'Push från PDHC', poll: 'Hämtad från PDHC', demo: 'Exempel, syntetiska data' } as const;
+const SOURCES = { push: 'Pushed by PDHC', poll: 'Fetched from PDHC', demo: 'Demo, synthetic data' } as const;
 export const sourceLabel = (value: keyof typeof SOURCES) => SOURCES[value];

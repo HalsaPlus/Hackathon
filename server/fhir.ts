@@ -212,7 +212,7 @@ export function parseActivity(raw: unknown, position: number, contained: Map<str
     codeText ??
     text(raw.plannedActivityReference?.display) ??
     description ??
-    `Aktivitet ${position + 1}`;
+    `Activity ${position + 1}`;
 
   const timing =
     timingFromFhir(detail?.scheduledTiming) ??
@@ -305,17 +305,20 @@ export interface ParsedDelivery {
   providerOrgGuid: string | null;
   receiptToken: string | null;
   grantToken: string | null;
-  carePlan: {
-    fhirId: string | null;
-    title: string | null;
-    description: string | null;
-    status: string | null;
-    periodStart: string | null;
-    periodEnd: string | null;
-    goals: Goal[];
-    activities: ParsedActivity[];
-    fhir: Json;
-  } | null;
+  /** Every care plan in the request; several when it covers several conditions. */
+  carePlans: ParsedCarePlan[];
+}
+
+export interface ParsedCarePlan {
+  fhirId: string | null;
+  title: string | null;
+  description: string | null;
+  status: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  goals: Goal[];
+  activities: ParsedActivity[];
+  fhir: Json;
 }
 
 /** Values PDHC puts in Bundle.meta.tag (system https://pdhc.se/delivery). */
@@ -354,7 +357,7 @@ export interface DeliveryContext {
  * ServiceRequest, and returns everything the app stores.
  */
 export function parseDelivery(resource: unknown, context: DeliveryContext = {}): ParsedDelivery {
-  if (!isObject(resource)) throw new InboundError('Kroppen är inte ett JSON-objekt.');
+  if (!isObject(resource)) throw new InboundError('The body is not a JSON object.');
 
   // Everything the ServiceRequest may refer to: bundle entries and contained.
   const resources: Json[] = [];
@@ -372,7 +375,7 @@ export function parseDelivery(resource: unknown, context: DeliveryContext = {}):
   } else if (resource.resourceType === 'ServiceRequest') {
     serviceRequest = resource;
   }
-  if (!serviceRequest) throw new InboundError('Ingen ServiceRequest hittades i det som skickades.');
+  if (!serviceRequest) throw new InboundError('No ServiceRequest was found in what was sent.');
 
   for (const item of list(serviceRequest.contained)) if (isObject(item)) resources.push(item);
 
@@ -381,14 +384,16 @@ export function parseDelivery(resource: unknown, context: DeliveryContext = {}):
     const id = text(item.id);
     if (id) byId.set(id, item);
   }
-  // Resources contained in the CarePlan itself (R5 planned activities, goals).
-  const carePlanFhir = resources.find((r) => r.resourceType === 'CarePlan');
-  for (const item of list(carePlanFhir?.contained)) {
-    if (isObject(item) && text(item.id)) byId.set(text(item.id)!, item);
+  // Resources contained in the CarePlans themselves (R5 planned activities, goals).
+  const carePlanResources = resources.filter((r) => r.resourceType === 'CarePlan');
+  for (const carePlan of carePlanResources) {
+    for (const item of list(carePlan.contained)) {
+      if (isObject(item) && text(item.id)) byId.set(text(item.id)!, item);
+    }
   }
 
   const guid = referenceId(serviceRequest.id);
-  if (!guid) throw new InboundError('ServiceRequest saknar id.');
+  if (!guid) throw new InboundError('The ServiceRequest has no id.');
 
   const subject = isObject(serviceRequest.subject) ? serviceRequest.subject : undefined;
   const subjectId = referenceId(subject?.reference);
@@ -396,7 +401,7 @@ export function parseDelivery(resource: unknown, context: DeliveryContext = {}):
     (subjectId ? byId.get(subjectId) : undefined) ?? resources.find((r) => r.resourceType === 'Patient');
   const patientGuid =
     context.patientGuid ?? (subject?.reference?.startsWith('#') ? undefined : subjectId) ?? text(patientFhir?.id);
-  if (!patientGuid) throw new InboundError('Det framgår inte vilken patient beställningen gäller.');
+  if (!patientGuid) throw new InboundError('It is not clear which patient the request is for.');
 
   const contractGuid =
     context.contractGuid ??
@@ -406,23 +411,28 @@ export function parseDelivery(resource: unknown, context: DeliveryContext = {}):
       .find((ref) => ref?.startsWith('Contract/'))
       ?.slice('Contract/'.length);
 
-  let carePlan: ParsedDelivery['carePlan'] = null;
-  const planDefinition = resources.find((r) => r.resourceType === 'PlanDefinition');
-  const planSource = carePlanFhir ?? planDefinition;
-  if (planSource) {
-    const rawActivities = list(carePlanFhir ? carePlanFhir.activity : planDefinition!.action);
+  // The plans: every CarePlan, or failing that every PlanDefinition.
+  const planSources = carePlanResources.length
+    ? carePlanResources
+    : resources.filter((r) => r.resourceType === 'PlanDefinition');
+  const several = planSources.length > 1;
+  const seen = new Set<string>();
+  const carePlans: ParsedCarePlan[] = planSources.map((planSource, planIndex) => {
+    const isCarePlan = planSource.resourceType === 'CarePlan';
+    const planId = text(planSource.id) ?? `plan-${planIndex + 1}`;
     const activities: ParsedActivity[] = [];
-    const seen = new Set<string>();
-    rawActivities.forEach((raw, position) => {
+    list(isCarePlan ? planSource.activity : planSource.action).forEach((raw, position) => {
       const activity = parseActivity(raw, position, byId);
       if (!activity) return;
-      // Keys must be unique within a plan; fall back to position if not.
+      // Keys must be unique within the request, since done stops are stored
+      // per request and key. With several plans the plan's id comes first.
+      if (several) activity.key = `${planId}:${activity.key}`;
       if (seen.has(activity.key)) activity.key = `${activity.key}-${position + 1}`;
       seen.add(activity.key);
       activities.push(activity);
     });
     const period = isObject(planSource.period) ? planSource.period : undefined;
-    carePlan = {
+    return {
       fhirId: text(planSource.id) ?? null,
       title: text(planSource.title) ?? null,
       description: text(planSource.description) ?? null,
@@ -435,7 +445,8 @@ export function parseDelivery(resource: unknown, context: DeliveryContext = {}):
       activities,
       fhir: planSource,
     };
-  }
+  });
+  const firstPlan = carePlans[0];
 
   const occurrence = isObject(serviceRequest.occurrencePeriod) ? serviceRequest.occurrencePeriod : undefined;
   return {
@@ -444,10 +455,10 @@ export function parseDelivery(resource: unknown, context: DeliveryContext = {}):
     status: text(serviceRequest.status) ?? null,
     intent: text(serviceRequest.intent) ?? null,
     priority: text(serviceRequest.priority) ?? null,
-    title: conceptText(serviceRequest.code) ?? text(serviceRequest.title) ?? carePlan?.title ?? null,
+    title: conceptText(serviceRequest.code) ?? text(serviceRequest.title) ?? (several ? null : firstPlan?.title) ?? null,
     authoredOn: text(serviceRequest.authoredOn) ?? null,
-    periodStart: text(occurrence?.start) ?? carePlan?.periodStart ?? null,
-    periodEnd: text(occurrence?.end) ?? carePlan?.periodEnd ?? null,
+    periodStart: text(occurrence?.start) ?? firstPlan?.periodStart ?? null,
+    periodEnd: text(occurrence?.end) ?? firstPlan?.periodEnd ?? null,
     patient: {
       guid: patientGuid,
       displayName: patientName(patientFhir, subject),
@@ -459,6 +470,6 @@ export function parseDelivery(resource: unknown, context: DeliveryContext = {}):
     providerOrgGuid: context.providerOrgGuid ?? tags.organisation_guid ?? null,
     receiptToken: context.receiptToken ?? tags.receipt_token ?? null,
     grantToken: context.grantToken ?? tags.grant_token ?? null,
-    carePlan,
+    carePlans,
   };
 }

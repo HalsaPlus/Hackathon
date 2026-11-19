@@ -88,16 +88,25 @@ function recordFailure(ip: string) {
 
 // --- Login page -----------------------------------------------------------------
 
-const NOT_CONFIGURED = 'Inloggningen är inte konfigurerad. Lösenordet (ADMIN_PASSWORD) saknas på servern.';
+const NOT_CONFIGURED = 'Sign-in is not configured. The password (ADMIN_PASSWORD) is missing on the server.';
 
-function loginPage(message?: string) {
+/** Only a path on this site, so the login cannot be used to send people elsewhere. */
+function safeNext(value: unknown): string {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) return '/';
+  return value.slice(0, 300);
+}
+
+const escapeHtml = (value: string) =>
+  value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+function loginPage(message?: string, next = '/') {
   return `<!doctype html>
-<html lang="sv">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex" />
-    <title>Logga in · MMD</title>
+    <title>Sign in · MMD</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -139,14 +148,15 @@ function loginPage(message?: string) {
   <body>
     <main>
       <h1>MMD</h1>
-      <p>Logga in för att fortsätta.</p>
+      <p>Sign in to continue.</p>
       ${message ? `<div class="message" role="alert">${message}</div>` : ''}
       <form method="post" action="/login">
-        <label for="username">Användarnamn</label>
+        <input type="hidden" name="next" value="${escapeHtml(next)}" />
+        <label for="username">Username</label>
         <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus />
-        <label for="password">Lösenord</label>
+        <label for="password">Password</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required />
-        <button type="submit">Logga in</button>
+        <button type="submit">Sign in</button>
       </form>
     </main>
   </body>
@@ -160,20 +170,22 @@ function loginPage(message?: string) {
  * registered after this call. Routes registered before it stay public.
  */
 export function setupAuth(app: Express) {
-  const sendLoginPage = (res: express.Response, status: number, message?: string) => {
-    res.status(status).set('Cache-Control', 'no-store').type('html').send(loginPage(message));
+  const sendLoginPage = (res: express.Response, status: number, message?: string, next = '/') => {
+    res.status(status).set('Cache-Control', 'no-store').type('html').send(loginPage(message, next));
   };
 
   app.get('/login', (req, res) => {
-    if (hasValidSession(req)) return res.redirect('/');
-    sendLoginPage(res, 200, loginConfigured ? undefined : NOT_CONFIGURED);
+    const next = safeNext(req.query.next);
+    if (hasValidSession(req)) return res.redirect(next);
+    sendLoginPage(res, 200, loginConfigured ? undefined : NOT_CONFIGURED, next);
   });
 
   app.post('/login', express.urlencoded({ extended: false, limit: '2kb' }), (req, res) => {
     const ip = req.ip ?? 'unknown';
-    if (!loginConfigured) return sendLoginPage(res, 503, NOT_CONFIGURED);
+    const next = safeNext((req.body ?? {}).next);
+    if (!loginConfigured) return sendLoginPage(res, 503, NOT_CONFIGURED, next);
     if (isBlocked(ip)) {
-      return sendLoginPage(res, 429, 'För många försök. Vänta tio minuter och försök igen.');
+      return sendLoginPage(res, 429, 'Too many attempts. Wait ten minutes and try again.', next);
     }
 
     const body: Record<string, unknown> = req.body ?? {};
@@ -181,7 +193,7 @@ export function setupAuth(app: Express) {
     const passwordOk = safeEqual(typeof body.password === 'string' ? body.password : '', password);
     if (!usernameOk || !passwordOk) {
       recordFailure(ip);
-      return sendLoginPage(res, 401, 'Fel användarnamn eller lösenord.');
+      return sendLoginPage(res, 401, 'Wrong username or password.', next);
     }
 
     failedAttempts.delete(ip);
@@ -192,7 +204,7 @@ export function setupAuth(app: Express) {
       maxAge: SESSION_MS,
       path: '/',
     });
-    res.redirect(303, '/');
+    res.redirect(303, next);
   });
 
   app.post('/logout', (req, res) => {
@@ -203,7 +215,7 @@ export function setupAuth(app: Express) {
   app.use((req, res, next) => {
     if (hasValidSession(req)) return next();
     if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Not signed in' });
-    if (req.method === 'GET' || req.method === 'HEAD') return res.redirect('/login');
+    if (req.method === 'GET' || req.method === 'HEAD') return res.redirect(`/login?next=${encodeURIComponent(req.originalUrl)}`);
     res.status(401).send('Not signed in');
   });
 }

@@ -7,17 +7,18 @@ import { formatDateTime } from '../format.ts';
 // fetches ServiceRequests. Also shows the push address and what has arrived.
 
 const OUTCOMES: Record<InboundLogEntry['outcome'], string> = {
-  created: 'Ny',
-  updated: 'Ändrad',
-  unchanged: 'Oförändrad',
-  rejected: 'Avvisad',
-  error: 'Fel',
+  created: 'New',
+  updated: 'Changed',
+  unchanged: 'Unchanged',
+  rejected: 'Rejected',
+  error: 'Error',
 };
-const CHANNELS: Record<InboundLogEntry['channel'], string> = { push: 'Push', poll: 'Hämtning', demo: 'Exempel' };
+const CHANNELS: Record<InboundLogEntry['channel'], string> = { push: 'Push', poll: 'Fetch', demo: 'Demo' };
 
 interface FormState {
   name: string;
   baseUrl: string;
+  gatewayUrl: string;
   providerToken: string;
   pushSecret: string;
   removePushSecret: boolean;
@@ -27,6 +28,7 @@ interface FormState {
 const EMPTY: FormState = {
   name: 'PDHC',
   baseUrl: 'https://request.pdhc.se/api/v1',
+  gatewayUrl: 'https://gateway.pdhc.se/api/v1',
   providerToken: '',
   pushSecret: '',
   removePushSecret: false,
@@ -43,7 +45,9 @@ function ConnectionForm({
   onCancel?: () => void;
 }) {
   const [form, setForm] = useState<FormState>(
-    existing ? { ...EMPTY, name: existing.name, baseUrl: existing.baseUrl, pollEnabled: existing.pollEnabled } : EMPTY,
+    existing
+      ? { ...EMPTY, name: existing.name, baseUrl: existing.baseUrl, gatewayUrl: existing.gatewayUrl, pollEnabled: existing.pollEnabled }
+      : EMPTY,
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +60,7 @@ function ConnectionForm({
     const input: ConnectionInput = {
       name: form.name,
       baseUrl: form.baseUrl,
+      gatewayUrl: form.gatewayUrl,
       pollEnabled: form.pollEnabled,
       providerToken: form.providerToken || undefined,
       // Leave the secret alone unless the user typed a new one or removed it.
@@ -66,7 +71,7 @@ function ConnectionForm({
       setForm((f) => ({ ...f, providerToken: '', pushSecret: '', removePushSecret: false }));
       onSaved(saved);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Det gick inte att spara.');
+      setError(e instanceof Error ? e.message : 'Could not save.');
     } finally {
       setBusy(false);
     }
@@ -76,7 +81,7 @@ function ConnectionForm({
   return (
     <form className="form" onSubmit={(e) => void submit(e)}>
       <div className="field">
-        <label htmlFor={`${id}-name`}>Namn</label>
+        <label htmlFor={`${id}-name`}>Name</label>
         <input id={`${id}-name`} value={form.name} onChange={(e) => set('name', e.target.value)} required maxLength={80} />
       </div>
       <div className="field">
@@ -91,7 +96,21 @@ function ConnectionForm({
           aria-describedby={`${id}-url-help`}
         />
         <p className="help" id={`${id}-url-help`}>
-          request.pdhc.se eller gateway.pdhc.se. <code>/api/v1</code> läggs till om det saknas.
+          request.pdhc.se or gateway.pdhc.se. <code>/api/v1</code> is added if missing.
+        </p>
+      </div>
+      <div className="field">
+        <label htmlFor={`${id}-gateway`}>Gateway URL (for reports)</label>
+        <input
+          id={`${id}-gateway`}
+          value={form.gatewayUrl}
+          onChange={(e) => set('gatewayUrl', e.target.value)}
+          inputMode="url"
+          spellCheck={false}
+          aria-describedby={`${id}-gateway-help`}
+        />
+        <p className="help" id={`${id}-gateway-help`}>
+          Measurements the patient reports go to gateway.pdhc, not to request.pdhc.
         </p>
       </div>
       <div className="field">
@@ -104,15 +123,15 @@ function ConnectionForm({
           required={!existing}
           autoComplete="off"
           spellCheck={false}
-          placeholder={existing ? `Sparad (${existing.tokenHint}). Fyll i för att byta.` : ''}
+          placeholder={existing ? `Saved (${existing.tokenHint}). Fill in to replace.` : ''}
           aria-describedby={`${id}-token-help`}
         />
         <p className="help" id={`${id}-token-help`}>
-          Provider Access Token från PDHC. Skickas i <code>X-Provider-Token</code> och visas aldrig igen efter att den sparats.
+          Provider Access Token from PDHC. Sent in <code>X-Provider-Token</code> and never shown again once saved.
         </p>
       </div>
       <div className="field">
-        <label htmlFor={`${id}-secret`}>Push-hemlighet (valfri)</label>
+        <label htmlFor={`${id}-secret`}>Push secret (optional)</label>
         <input
           id={`${id}-secret`}
           type="password"
@@ -121,12 +140,12 @@ function ConnectionForm({
           autoComplete="off"
           spellCheck={false}
           disabled={form.removePushSecret}
-          placeholder={existing?.hasPushSecret ? 'Sparad. Fyll i för att byta.' : ''}
+          placeholder={existing?.hasPushSecret ? 'Saved. Fill in to replace.' : ''}
           aria-describedby={`${id}-secret-help`}
         />
         <p className="help" id={`${id}-secret-help`}>
-          Behövs bara för push. PDHC skickar den i <code>X-Push-Secret</code>, och appen tar bara emot pushar som har rätt
-          hemlighet.
+          Only needed for push. PDHC sends it in <code>X-Push-Secret</code>, and the app only accepts pushes with the right
+          secret.
         </p>
         {existing?.hasPushSecret && (
           <label className="check">
@@ -135,13 +154,13 @@ function ConnectionForm({
               checked={form.removePushSecret}
               onChange={(e) => set('removePushSecret', e.target.checked)}
             />
-            Ta bort push-hemligheten
+            Remove the push secret
           </label>
         )}
       </div>
       <label className="check">
         <input type="checkbox" checked={form.pollEnabled} onChange={(e) => set('pollEnabled', e.target.checked)} />
-        Hämta nya beställningar automatiskt varje minut
+        Fetch new requests automatically every minute
       </label>
       {error && (
         <p className="error" role="alert">
@@ -150,11 +169,11 @@ function ConnectionForm({
       )}
       <div className="actions">
         <button type="submit" className="button" disabled={busy}>
-          {busy ? 'Sparar …' : existing ? 'Spara ändringar' : 'Spara anslutning'}
+          {busy ? 'Saving …' : existing ? 'Save changes' : 'Save connection'}
         </button>
         {onCancel && (
           <button type="button" className="button subtle" onClick={onCancel}>
-            Avbryt
+            Cancel
           </button>
         )}
       </div>
@@ -181,20 +200,20 @@ function ConnectionCard({
     try {
       onChange(kind === 'test' ? await api.testConnection(connection.id) : await api.syncConnection(connection.id));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Något gick fel.');
+      setError(e instanceof Error ? e.message : 'Something went wrong.');
     } finally {
       setBusy(null);
     }
   };
 
   const remove = async () => {
-    if (!window.confirm(`Ta bort anslutningen "${connection.name}"? Beställningar som redan tagits emot ligger kvar.`)) return;
+    if (!window.confirm(`Remove the connection "${connection.name}"? Requests already received stay.`)) return;
     setBusy('delete');
     try {
       await api.deleteConnection(connection.id);
       onDeleted();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Det gick inte att ta bort.');
+      setError(e instanceof Error ? e.message : 'Could not remove it.');
       setBusy(null);
     }
   };
@@ -204,9 +223,7 @@ function ConnectionCard({
       <header className="connection-header">
         <h2>{connection.name}</h2>
         {connection.lastTestOk !== null && (
-          <span className={`pill ${connection.lastTestOk ? 'ok' : 'bad'}`}>
-            {connection.lastTestOk ? 'Fungerar' : 'Fungerar inte'}
-          </span>
+          <span className={`pill ${connection.lastTestOk ? 'ok' : 'bad'}`}>{connection.lastTestOk ? 'Working' : 'Not working'}</span>
         )}
       </header>
 
@@ -227,27 +244,31 @@ function ConnectionCard({
               <dd className="mono">{connection.baseUrl}</dd>
             </div>
             <div>
+              <dt>Reports go to</dt>
+              <dd className="mono">{connection.gatewayUrl}</dd>
+            </div>
+            <div>
               <dt>Token</dt>
               <dd className="mono">{connection.tokenHint}</dd>
             </div>
             <div>
               <dt>Push</dt>
-              <dd>{connection.hasPushSecret ? 'Hemlighet sparad' : 'Ingen hemlighet, push tas inte emot'}</dd>
+              <dd>{connection.hasPushSecret ? 'Secret saved' : 'No secret, pushes are not accepted'}</dd>
             </div>
             <div>
-              <dt>Hämtning</dt>
-              <dd>{connection.pollEnabled ? 'Automatiskt varje minut' : 'När du trycker på Hämta'}</dd>
+              <dt>Fetching</dt>
+              <dd>{connection.pollEnabled ? 'Automatically every minute' : 'When you press Fetch'}</dd>
             </div>
           </dl>
 
           <div className="results">
             <p>
-              <strong>Senaste test:</strong>{' '}
-              {connection.lastTestAt ? `${formatDateTime(connection.lastTestAt)}. ${connection.lastTestMessage}` : 'Inte testad ännu.'}
+              <strong>Last test:</strong>{' '}
+              {connection.lastTestAt ? `${formatDateTime(connection.lastTestAt)}. ${connection.lastTestMessage}` : 'Not tested yet.'}
             </p>
             <p>
-              <strong>Senaste hämtning:</strong>{' '}
-              {connection.lastSyncAt ? `${formatDateTime(connection.lastSyncAt)}. ${connection.lastSyncMessage}` : 'Inte hämtat ännu.'}
+              <strong>Last fetch:</strong>{' '}
+              {connection.lastSyncAt ? `${formatDateTime(connection.lastSyncAt)}. ${connection.lastSyncMessage}` : 'Nothing fetched yet.'}
             </p>
           </div>
 
@@ -259,16 +280,16 @@ function ConnectionCard({
 
           <div className="actions">
             <button type="button" className="button" onClick={() => void run('test')} disabled={busy !== null}>
-              {busy === 'test' ? 'Testar …' : 'Testa anslutningen'}
+              {busy === 'test' ? 'Testing …' : 'Test the connection'}
             </button>
             <button type="button" className="button secondary" onClick={() => void run('sync')} disabled={busy !== null}>
-              {busy === 'sync' ? 'Hämtar …' : 'Hämta beställningar'}
+              {busy === 'sync' ? 'Fetching …' : 'Fetch requests'}
             </button>
             <button type="button" className="button subtle" onClick={() => setEditing(true)} disabled={busy !== null}>
-              Ändra
+              Edit
             </button>
             <button type="button" className="button subtle danger" onClick={() => void remove()} disabled={busy !== null}>
-              Ta bort
+              Remove
             </button>
           </div>
         </>
@@ -278,17 +299,17 @@ function ConnectionCard({
 }
 
 function InboundLog({ entries }: { entries: InboundLogEntry[] }) {
-  if (entries.length === 0) return <p className="muted">Inget har kommit in ännu.</p>;
+  if (entries.length === 0) return <p className="muted">Nothing has arrived yet.</p>;
   return (
     <div className="table-scroll">
       <table className="table">
         <thead>
           <tr>
-            <th scope="col">Tid</th>
-            <th scope="col">Väg</th>
-            <th scope="col">Utfall</th>
-            <th scope="col">Beställning</th>
-            <th scope="col">Meddelande</th>
+            <th scope="col">Time</th>
+            <th scope="col">Channel</th>
+            <th scope="col">Outcome</th>
+            <th scope="col">Request</th>
+            <th scope="col">Message</th>
           </tr>
         </thead>
         <tbody>
@@ -327,7 +348,7 @@ export function ConnectionsPage() {
       setConnections(list);
       setLog(entries);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Det gick inte att hämta anslutningarna.');
+      setError(e instanceof Error ? e.message : 'Could not load the connections.');
     }
   }, []);
 
@@ -349,11 +370,10 @@ export function ConnectionsPage() {
     <>
       <header className="page-header">
         <div>
-          <h1>Anslutning till PDHC</h1>
+          <h1>Connection to PDHC</h1>
           <p className="lead">
-            Ange URL och token för att ta emot beställningar. PDHC levererar på två sätt: <strong>push</strong>, där PDHC
-            skickar beställningen hit, och <strong>hämtning</strong>, där appen själv läser PDHC:s lista och laddar ner nya
-            beställningar.
+            Enter URL and token to receive requests. PDHC delivers in two ways: <strong>push</strong>, where PDHC sends the
+            request here, and <strong>fetch</strong>, where the app reads PDHC's list itself and downloads new requests.
           </p>
         </div>
       </header>
@@ -365,18 +385,13 @@ export function ConnectionsPage() {
       )}
 
       {connections?.map((connection) => (
-        <ConnectionCard
-          key={connection.id}
-          connection={connection}
-          onChange={() => void load()}
-          onDeleted={() => void load()}
-        />
+        <ConnectionCard key={connection.id} connection={connection} onChange={() => void load()} onDeleted={() => void load()} />
       ))}
 
       {connections !== null &&
         (adding || connections.length === 0 ? (
           <article className="card">
-            <h2>Ny anslutning</h2>
+            <h2>New connection</h2>
             <ConnectionForm
               existing={null}
               onSaved={() => {
@@ -388,32 +403,32 @@ export function ConnectionsPage() {
           </article>
         ) : (
           <button type="button" className="button subtle" onClick={() => setAdding(true)}>
-            Lägg till en anslutning till
+            Add another connection
           </button>
         ))}
 
       <article className="card">
-        <h2>Adress för push</h2>
-        <p>Ge den här adressen och push-hemligheten till PDHC, så skickar PDHC nya beställningar direkt hit.</p>
+        <h2>Push address</h2>
+        <p>Give this address and the push secret to PDHC, and PDHC sends new requests straight here.</p>
         <div className="copy-row">
           <code className="copy-value">{pushUrl}</code>
           <button type="button" className="button subtle" onClick={() => void copy()}>
-            {copied ? 'Kopierad' : 'Kopiera'}
+            {copied ? 'Copied' : 'Copy'}
           </button>
         </div>
         {isLocal && (
           <p className="notice">
-            Appen körs på din egen dator, så PDHC kan inte nå adressen. Lokalt fungerar bara hämtning. Push kräver att appen
-            ligger på en publik adress.
+            The app runs on your own computer, so PDHC cannot reach this address. Locally only fetching works. Push needs
+            the app on a public address.
           </p>
         )}
       </article>
 
       <article className="card">
         <header className="connection-header">
-          <h2>Det som kommit in</h2>
+          <h2>What has arrived</h2>
           <button type="button" className="button subtle" onClick={() => void load()}>
-            Uppdatera
+            Refresh
           </button>
         </header>
         <InboundLog entries={log} />

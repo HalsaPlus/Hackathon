@@ -34,11 +34,11 @@ export function normalizeBaseUrl(input: string): string {
   try {
     url = new URL(value);
   } catch {
-    throw new PdhcError('URL:en går inte att tolka.');
+    throw new PdhcError('The URL cannot be read.');
   }
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-  if (url.protocol !== 'https:' && !local) throw new PdhcError('URL:en måste börja med https://.');
-  if (url.username || url.password) throw new PdhcError('Lägg inte inloggningsuppgifter i URL:en.');
+  if (url.protocol !== 'https:' && !local) throw new PdhcError('The URL must start with https://.');
+  if (url.username || url.password) throw new PdhcError('Do not put credentials in the URL.');
   url.search = '';
   url.hash = '';
   let pathname = url.pathname.replace(/\/+$/, '');
@@ -50,22 +50,22 @@ export function normalizeBaseUrl(input: string): string {
 function describeStatus(status: number): string {
   switch (status) {
     case 401:
-      return 'PDHC godtog inte token (401). Kontrollera att den är rätt och inte har gått ut eller återkallats.';
+      return 'PDHC did not accept the token (401). Check that it is correct and has not expired or been revoked.';
     case 403:
-      return 'Token saknar behörighet för det här (403).';
+      return 'The token is not allowed to do this (403).';
     case 404:
-      return 'Adressen svarar men har inte det PDHC-anrop som behövs (404). Kontrollera URL:en.';
+      return 'The address answers but does not have the PDHC call needed (404). Check the URL.';
     case 502:
     case 503:
     case 504:
-      return `PDHC svarar inte just nu (${status}). Försök igen om en stund.`;
+      return `PDHC is not answering right now (${status}). Try again in a while.`;
     default:
-      return `PDHC svarade med fel ${status}.`;
+      return `PDHC answered with error ${status}.`;
   }
 }
 
-async function call(connection: Connection, method: 'GET' | 'POST', path: string, body?: unknown) {
-  const url = `${connection.base_url}${path}`;
+async function call(connection: Connection, method: 'GET' | 'POST', path: string, body?: unknown, base = connection.base_url) {
+  const url = `${base}${path}`;
   let response: Response;
   try {
     response = await fetch(url, {
@@ -81,8 +81,8 @@ async function call(connection: Connection, method: 'GET' | 'POST', path: string
     });
   } catch (error) {
     const host = new URL(url).host;
-    const reason = error instanceof Error && error.name === 'TimeoutError' ? 'inget svar inom 20 sekunder' : 'nätverksfel';
-    throw new PdhcError(`Kunde inte nå ${host} (${reason}).`);
+    const reason = error instanceof Error && error.name === 'TimeoutError' ? 'no answer within 20 seconds' : 'network error';
+    throw new PdhcError(`Could not reach ${host} (${reason}).`);
   }
   const textBody = await response.text();
   if (!response.ok) {
@@ -93,13 +93,13 @@ async function call(connection: Connection, method: 'GET' | 'POST', path: string
     } catch {
       // Not JSON; the status says enough.
     }
-    throw new PdhcError(`${describeStatus(response.status)}${detail ? ` Svar: ${String(detail).slice(0, 200)}` : ''}`, response.status);
+    throw new PdhcError(`${describeStatus(response.status)}${detail ? ` Answer: ${String(detail).slice(0, 200)}` : ''}`, response.status);
   }
   if (!textBody) return undefined;
   try {
     return JSON.parse(textBody) as unknown;
   } catch {
-    throw new PdhcError('PDHC svarade, men inte med JSON. Kontrollera att URL:en pekar på API:t.');
+    throw new PdhcError('PDHC answered, but not with JSON. Check that the URL points at the API.');
   }
 }
 
@@ -138,7 +138,7 @@ export interface Download {
 export async function download(connection: Connection, serviceRequestGuid: string): Promise<Download> {
   const body = (await call(connection, 'GET', `/provider/download/${encodeURIComponent(serviceRequestGuid)}`)) as Download | undefined;
   if (!body || typeof body !== 'object' || !('fhir_resource' in body)) {
-    throw new PdhcError('Nedladdningen saknade fhir_resource.');
+    throw new PdhcError('The download had no fhir_resource.');
   }
   return body;
 }
@@ -147,9 +147,35 @@ export async function acknowledge(connection: Connection, receiptToken: string) 
   await call(connection, 'POST', `/provider/receipt/${encodeURIComponent(receiptToken)}/ack`, { status: 'acknowledged' });
 }
 
+export interface GatewayReport {
+  patient_guid: string;
+  grant_token: string;
+  status: 'in-progress' | 'completed';
+  report_payload: {
+    observations: { transaction_guid: string; value: string; recorded_at: string; notes?: string }[];
+  };
+}
+
+/**
+ * Sends observations to gateway.pdhc (provider technical manual, section 5).
+ * Only transaction_guid, value, recorded_at and notes: the gateway derives
+ * concept and unit from the request, and the organisation (the source) from
+ * the PAT. Answers `status: "recorded"` when accepted.
+ */
+export async function reportToGateway(connection: Connection, gatewayUrl: string, serviceRequestGuid: string, report: GatewayReport) {
+  const body = (await call(
+    connection,
+    'POST',
+    `/provider/report/${encodeURIComponent(serviceRequestGuid)}`,
+    report,
+    gatewayUrl,
+  )) as { status?: string; match_status?: string } | undefined;
+  return { status: body?.status ?? 'unknown', matchStatus: body?.match_status ?? null };
+}
+
 /** Reads one feed item: proves that the URL and the token work, without downloading patient data. */
 export async function testConnection(connection: Connection): Promise<string> {
   const feed = await fetchFeed(connection, null, 1);
   const total = feed.total ?? feed.items.length;
-  return `Anslutningen fungerar. PDHC har ${total} ${total === 1 ? 'beställning' : 'beställningar'} till er.`;
+  return `The connection works. PDHC has ${total} ${total === 1 ? 'request' : 'requests'} for you.`;
 }

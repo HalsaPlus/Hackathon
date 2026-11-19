@@ -23,6 +23,7 @@ db.exec(`
     name              TEXT NOT NULL,
     base_url          TEXT NOT NULL,
     provider_token    TEXT NOT NULL,
+    gateway_url       TEXT,
     push_secret       TEXT,
     poll_enabled      INTEGER NOT NULL DEFAULT 0,
     feed_since        TEXT,
@@ -70,6 +71,7 @@ db.exec(`
     grant_token       TEXT,
     ack_status        TEXT,
     pdhc_updated_at   TEXT,
+    seen_at           TEXT,
     checksum          TEXT NOT NULL,
     fhir_json         TEXT NOT NULL,
     received_at       TEXT NOT NULL,
@@ -77,11 +79,12 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS service_requests_patient ON service_requests(patient_guid);
 
-  -- The care plan inside a ServiceRequest. Replaced when PDHC sends a changed
+  -- The care plans inside a ServiceRequest (one request may carry several, e.g.
+  -- diabetes, reumatologi and ADHD). Replaced when PDHC sends a changed
   -- version of the same ServiceRequest.
   CREATE TABLE IF NOT EXISTS care_plans (
     id                   INTEGER PRIMARY KEY,
-    service_request_guid TEXT NOT NULL UNIQUE REFERENCES service_requests(guid) ON DELETE CASCADE,
+    service_request_guid TEXT NOT NULL REFERENCES service_requests(guid) ON DELETE CASCADE,
     fhir_id              TEXT,
     title                TEXT,
     description          TEXT,
@@ -129,6 +132,114 @@ db.exec(`
     message              TEXT
   );
 `);
+
+// --- Version 2: the patient app --------------------------------------------------
+// Upgrades a version 1 database in place, then adds the app's tables.
+
+const version = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
+if (version < 2) {
+  const columns = (table: string) =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+  if (!columns('connections').includes('gateway_url')) db.exec('ALTER TABLE connections ADD COLUMN gateway_url TEXT');
+  if (!columns('service_requests').includes('seen_at')) db.exec('ALTER TABLE service_requests ADD COLUMN seen_at TEXT');
+
+  // Version 1 allowed one care plan per request. SQLite cannot drop a UNIQUE
+  // constraint, so the table is rebuilt. Foreign keys are off meanwhile, or
+  // dropping the old table would delete every activity with it.
+  const unique = (db.prepare('PRAGMA index_list(care_plans)').all() as { unique: number; origin: string }[]).some(
+    (index) => index.unique === 1 && index.origin === 'u',
+  );
+  if (unique) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec(`
+      BEGIN;
+      CREATE TABLE care_plans_v2 (
+        id                   INTEGER PRIMARY KEY,
+        service_request_guid TEXT NOT NULL REFERENCES service_requests(guid) ON DELETE CASCADE,
+        fhir_id              TEXT,
+        title                TEXT,
+        description          TEXT,
+        status               TEXT,
+        goals_json           TEXT NOT NULL,
+        fhir_json            TEXT
+      );
+      INSERT INTO care_plans_v2 SELECT id, service_request_guid, fhir_id, title, description, status, goals_json, fhir_json FROM care_plans;
+      DROP TABLE care_plans;
+      ALTER TABLE care_plans_v2 RENAME TO care_plans;
+      COMMIT;
+    `);
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+  db.exec('PRAGMA user_version = 2');
+}
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS care_plans_request ON care_plans(service_request_guid);
+
+  -- Values the patient reports, with the stamp the flow asks for: patient
+  -- generated, from MMD (and which device), and where in which plan. The
+  -- report status says whether gateway.pdhc has recorded it.
+  CREATE TABLE IF NOT EXISTS observations (
+    id                   INTEGER PRIMARY KEY,
+    patient_guid         TEXT NOT NULL REFERENCES patients(guid),
+    service_request_guid TEXT NOT NULL REFERENCES service_requests(guid) ON DELETE CASCADE,
+    activity_key         TEXT NOT NULL,
+    stop_index           INTEGER,
+    name                 TEXT NOT NULL,
+    transaction_guid     TEXT,
+    concept_guid         TEXT,
+    value                TEXT NOT NULL,
+    unit                 TEXT,
+    recorded_at          TEXT NOT NULL,
+    patient_reported     INTEGER NOT NULL DEFAULT 1,
+    source_app           TEXT NOT NULL,
+    device               TEXT,
+    care_plan_ref        TEXT,
+    plan_day             INTEGER,
+    note                 TEXT,
+    report_status        TEXT NOT NULL CHECK (report_status IN ('pending', 'sent', 'failed', 'demo')),
+    report_message       TEXT,
+    reported_at          TEXT,
+    confirmed            INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS observations_patient ON observations(patient_guid, recorded_at);
+
+  -- The chat between the patient and the care team, plus system notes such as
+  -- "a new plan arrived".
+  CREATE TABLE IF NOT EXISTS messages (
+    id                   INTEGER PRIMARY KEY,
+    patient_guid         TEXT NOT NULL REFERENCES patients(guid),
+    sender               TEXT NOT NULL CHECK (sender IN ('patient', 'care-team', 'system')),
+    text                 TEXT NOT NULL,
+    service_request_guid TEXT,
+    created_at           TEXT NOT NULL,
+    fhir_json            TEXT,
+    cdr_status           TEXT,
+    cdr_message          TEXT
+  );
+  CREATE INDEX IF NOT EXISTS messages_patient ON messages(patient_guid, created_at);
+
+  -- The latest IPS (International Patient Summary, a FHIR document Bundle)
+  -- per patient, fetched through Health Connect. In the demo: synthetic.
+  CREATE TABLE IF NOT EXISTS ips_documents (
+    patient_guid TEXT PRIMARY KEY REFERENCES patients(guid),
+    source       TEXT NOT NULL,
+    synthetic    INTEGER NOT NULL,
+    bundle_json  TEXT NOT NULL,
+    fetched_at   TEXT NOT NULL
+  );
+  DROP TABLE IF EXISTS clinical_results;
+`);
+
+// Columns added after the tables first shipped in this version.
+for (const [table, column] of [
+  ['messages', 'fhir_json'],
+  ['messages', 'cdr_status'],
+  ['messages', 'cdr_message'],
+] as const) {
+  const names = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+  if (!names.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+}
 
 export const now = () => new Date().toISOString();
 

@@ -1,21 +1,35 @@
 import { parseDelivery } from './fhir.ts';
-import { activityStops, clearPerformances, getPatientView, logInbound, seedPerformance, storeDelivery } from './store.ts';
+import { buildDemoIps } from './ips.ts';
+import {
+  activityStops,
+  addMessage,
+  clearPatientAppData,
+  clearPerformances,
+  getPatientView,
+  insertObservation,
+  logInbound,
+  saveIps,
+  seedPerformance,
+  storeDelivery,
+} from './store.ts';
+import { run } from './db.ts';
 
-// A synthetic delivery shaped like a PDHC push (provider technical manual,
-// section 4): a Bundle of type "message" with receipt_token and grant_token in
-// meta.tag, and a ServiceRequest with a contained Patient, Goals and CarePlan.
+// The demo case from the whiteboard: Andrea, flagged in the control tower,
+// agrees on a new plan in the chat, and gets one request with three
+// longitudinal care plans: diabetes, rheumatology and ADHD.
 //
-// The care plan follows plan.pdhc's "Asthma home monitoring" PlanDefinition,
-// including its concept GUIDs, so the activities match what the platform
-// actually has. The patient is the Swedish test person Tolvan Tolvansson and
-// is entirely fictional. No real patient data, ever.
+// It is shaped like a PDHC push (provider technical manual, section 4): a
+// Bundle of type "message" with receipt_token and grant_token in meta.tag, and
+// a ServiceRequest with a contained Patient, Goals and CarePlans. It goes
+// through the same parser and store as a real delivery.
 //
-// The activities use two different schedule formats on purpose (FHIR Timing
-// and plan.pdhc's flat timing_* fields), so the demo exercises both parsers.
+// Everything here is synthetic. Andrea is not a real person.
 
 const DAY = 24 * 60 * 60 * 1000;
-const PATIENT_GUID = '6f1c2b8e-4d3a-4e5f-9a7b-1c2d3e4f5a60';
-const SERVICE_REQUEST_GUID = '9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c61';
+const HOUR = 60 * 60 * 1000;
+const PATIENT_GUID = 'a7d3c1e2-5b4f-4c6a-9e8d-2f1b0c3d4e51';
+const SERVICE_REQUEST_GUID = 'c4e2a9b1-7d3f-4e5a-8b6c-9d0e1f2a3b42';
+const DEMO_NOTE = 'Demo mode: not sent to PDHC. The confirmation is simulated.';
 
 function startOfToday() {
   const date = new Date();
@@ -23,16 +37,32 @@ function startOfToday() {
   return date.getTime();
 }
 
-const isoDate = (time: number) => new Date(time).toISOString().slice(0, 10);
-
-function transaction(conceptGuid: string, name: string, requirement: string) {
-  return { concept_guid: conceptGuid, concept_name: name, requirement_type: requirement };
+/** The local calendar date, so a plan starting "today" starts today here, not in UTC. */
+function isoDate(time: number) {
+  const date = new Date(time);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export function buildDemoBundle() {
-  // The plan started five weeks ago and runs for twelve weeks.
-  const start = startOfToday() - 35 * DAY;
+function transaction(name: string, extra: Record<string, unknown> = {}) {
+  return { concept_name: name, requirement_type: 'required', ...extra };
+}
+
+function goal(id: string, text: string, measure: string, detail: string) {
+  return {
+    resourceType: 'Goal',
+    id,
+    lifecycleStatus: 'active',
+    description: { text },
+    target: [{ measure: { text: measure }, detailString: detail }],
+  };
+}
+
+export function buildDemoBundle(today = startOfToday()) {
+  // The plan started eight days ago (today is day 9) and runs for twelve weeks.
+  const start = today - 8 * DAY;
   const end = start + 12 * 7 * DAY;
+  const period = { start: isoDate(start), end: isoDate(end) };
 
   return {
     resourceType: 'Bundle',
@@ -51,108 +81,103 @@ export function buildDemoBundle() {
           status: 'active',
           intent: 'order',
           priority: 'routine',
-          code: { text: 'Astma – hemmonitorering' },
-          subject: { reference: `Patient/${PATIENT_GUID}`, display: 'Tolvan Tolvansson' },
-          authoredOn: new Date(start - 2 * DAY).toISOString(),
-          occurrencePeriod: { start: isoDate(start), end: isoDate(end) },
+          code: { text: 'New plan: diabetes, rheumatology and ADHD' },
+          subject: { reference: `Patient/${PATIENT_GUID}`, display: 'Andrea Testsson' },
+          authoredOn: new Date(start - DAY).toISOString(),
+          occurrencePeriod: period,
           basedOn: [{ reference: 'Contract/demo-contract' }],
           contained: [
+            { resourceType: 'Patient', id: PATIENT_GUID, name: [{ given: ['Andrea'], family: 'Testsson' }], birthDate: '1984-03-14' },
+            goal('goal-glucose', 'Morning blood glucose 4–8 mmol/L', 'Blood glucose', '4–8 mmol/L'),
+            goal('goal-stiffness', 'Less joint stiffness in the morning', 'Joint stiffness', 'at most 3 of 10'),
+            goal('goal-sleep', 'More even sleep and focus', 'Sleep', 'at least 7 hours'),
             {
-              resourceType: 'Patient',
-              id: PATIENT_GUID,
-              name: [{ given: ['Tolvan'], family: 'Tolvansson' }],
-              gender: 'male',
-              birthDate: '1912-12-12',
-            },
-            {
-              resourceType: 'Goal',
-              id: 'goal-act',
-              lifecycleStatus: 'active',
-              description: { text: 'Välkontrollerad astma' },
-              target: [{ measure: { text: 'ACT-poäng' }, detailString: 'minst 20' }],
-            },
-            {
-              resourceType: 'Goal',
-              id: 'goal-pef',
-              lifecycleStatus: 'active',
-              description: { text: 'Stabil lungfunktion' },
-              target: [{ measure: { text: 'PEF' }, detailString: 'över 80 % av personligt bästa' }],
+              resourceType: 'CarePlan',
+              id: 'diabetes',
+              status: 'active',
+              intent: 'plan',
+              title: 'Diabetes',
+              description: 'Blood glucose every morning, read from Health.',
+              period,
+              goal: [{ reference: '#goal-glucose' }],
+              activity: [
+                {
+                  id: 'glucose',
+                  detail: {
+                    code: { text: 'Blood glucose' },
+                    description: 'Measure your blood glucose in the morning. The value is read from Health.',
+                    status: 'in-progress',
+                    performer: [{ display: 'Patient' }],
+                    scheduledTiming: { repeat: { frequency: 1, period: 1, periodUnit: 'd' } },
+                  },
+                  // plan.pdhc's concept for blood glucose (the CGM PlanDefinition).
+                  transactions: [
+                    transaction('Blood glucose', {
+                      concept_guid: '1c34a590-fc2d-430c-92e6-d123b95fe392',
+                      unit: 'mmol/L',
+                      range_min: 3,
+                      range_max: 10,
+                    }),
+                  ],
+                },
+                {
+                  id: 'follow-up',
+                  detail: {
+                    code: { text: 'Follow-up with the care team' },
+                    description: 'A review of all three plans. The plan is adjusted if needed.',
+                    status: 'scheduled',
+                    performer: [{ display: 'Practitioner' }],
+                    scheduledTiming: { event: [new Date(start + 28 * DAY + 9 * HOUR).toISOString()] },
+                  },
+                },
+              ],
             },
             {
               resourceType: 'CarePlan',
-              id: 'careplan-astma',
+              id: 'rheumatology',
               status: 'active',
               intent: 'plan',
-              title: 'Astma – hemmonitorering',
-              description:
-                'Daglig dagbok med symtom och PEF, spirometri varje vecka och uppföljning med astmasjuksköterskan.',
-              period: { start: isoDate(start), end: isoDate(end) },
-              goal: [{ reference: '#goal-act' }, { reference: '#goal-pef' }],
+              title: 'Rheumatology',
+              description: 'Rate joint stiffness every other morning.',
+              period,
+              goal: [{ reference: '#goal-stiffness' }],
               activity: [
                 {
-                  // plan.pdhc's flat format.
-                  id: 'inhalationsteknik',
-                  title: 'Se filmen om inhalationsteknik',
-                  description: 'En kort film om hur inhalatorn används rätt.',
-                  performer_type: 'Patient',
-                  timing_type: 'once',
-                  timing_frequency: 1,
-                  timing_period: 2,
-                  timing_period_unit: 'd',
-                  transactions: [],
-                },
-                {
-                  // FHIR Timing in detail.scheduledTiming.
-                  id: 'dagbok',
+                  id: 'stiffness',
                   detail: {
-                    code: { text: 'Symtomdagbok och PEF' },
-                    description: 'Fyll i dagboken och mät PEF (peak flow) varje morgon.',
+                    code: { text: 'Joint stiffness' },
+                    description: 'Rate how stiff your joints are this morning, from 0 to 10.',
+                    status: 'in-progress',
+                    performer: [{ display: 'Patient' }],
+                    scheduledTiming: { repeat: { frequency: 1, period: 2, periodUnit: 'd' } },
+                  },
+                  transactions: [transaction('Joint stiffness (0–10)', { range_min: 0, range_max: 10 })],
+                },
+              ],
+            },
+            {
+              resourceType: 'CarePlan',
+              id: 'adhd',
+              status: 'active',
+              intent: 'plan',
+              title: 'ADHD',
+              description: 'An evening check of sleep and focus.',
+              period,
+              goal: [{ reference: '#goal-sleep' }],
+              activity: [
+                {
+                  id: 'evening-check',
+                  detail: {
+                    code: { text: 'Sleep and focus' },
+                    description: 'Hours slept last night (read from Health) and how well you could focus today, from 0 to 10.',
                     status: 'in-progress',
                     performer: [{ display: 'Patient' }],
                     scheduledTiming: { repeat: { frequency: 1, period: 1, periodUnit: 'd' } },
                   },
                   transactions: [
-                    transaction('8baad6ac-486d-4428-ab37-9f971f43fd71', 'asthma-peak-flow', 'required'),
-                    transaction('15cedab1-f694-467d-96dc-ad9bbd5794db', 'asthma-daytime-symptoms', 'required'),
-                    transaction('6f6fbe8d-4e7e-4989-984a-b6d2b0ebcac4', 'asthma-night-waking', 'required'),
-                    transaction('89864ae4-012f-4d62-9cb8-ac15ab66e6c4', 'asthma-reliever-use', 'required'),
-                    transaction('0c15ab68-5c79-4a35-a123-60fb69e64cf3', 'asthma-controller-taken', 'required'),
-                    transaction('45870f77-ce44-4ebb-85d0-b9af5917504f', 'asthma-wheeze', 'optional'),
+                    transaction('Sleep', { unit: 'h', range_min: 0, range_max: 14 }),
+                    transaction('Focus (0–10)', { range_min: 0, range_max: 10 }),
                   ],
-                },
-                {
-                  // plan.pdhc's flat format.
-                  id: 'spirometri',
-                  title: 'Spirometri hemma',
-                  description: 'Mät FEV1 med hemspirometern.',
-                  performer_type: 'Patient',
-                  timing_type: 'repeat',
-                  timing_frequency: 1,
-                  timing_period: 1,
-                  timing_period_unit: 'wk',
-                  transactions: [transaction('6521528c-db59-45c5-a492-003c28f27623', 'FEV1', 'optional')],
-                },
-                {
-                  id: 'act',
-                  detail: {
-                    code: { text: 'Astmakontrolltest (ACT)' },
-                    description: 'Fem frågor om hur astman har påverkat dig de senaste fyra veckorna.',
-                    status: 'scheduled',
-                    performer: [{ display: 'Patient' }],
-                    scheduledTiming: { repeat: { frequency: 1, period: 4, periodUnit: 'wk' } },
-                  },
-                  transactions: [],
-                },
-                {
-                  id: 'uppfoljning',
-                  detail: {
-                    code: { text: 'Uppföljning hos astmasjuksköterskan' },
-                    description: 'Genomgång av dagboken, spirometrin och ACT. Planen justeras vid behov.',
-                    status: 'scheduled',
-                    performer: [{ display: 'Astmasjuksköterska' }],
-                    scheduledTiming: { event: [new Date(end - 3 * DAY + 9 * 60 * 60 * 1000).toISOString()] },
-                  },
-                  transactions: [],
                 },
               ],
             },
@@ -163,30 +188,99 @@ export function buildDemoBundle() {
   };
 }
 
-/** Which past stops the demo patient skipped, so the map shows missed stops too. */
-function skipped(activityKey: string, index: number) {
-  if (activityKey === 'dagbok') return index % 6 === 4 || index === 33;
-  if (activityKey === 'spirometri') return index === 2;
-  return false;
-}
+/** A small deterministic wobble, so the history looks real but is the same every time. */
+const wobble = (i: number, size: number) => (((i * 37) % 11) - 5) * (size / 5);
+
+/** The past stops Andrea skipped, so the map shows missed stops too. */
+const missed: Record<string, number[]> = {
+  'diabetes:glucose': [5],
+  'adhd:evening-check': [0],
+};
 
 /**
  * Creates (or recreates, with fresh dates) the demo request through the same
- * path as a real push, then marks the past stops as done.
+ * path as a real push, then fills in the history: done stops with values,
+ * the chat that led to the plan, and a synthetic IPS.
  */
 export function createDemo() {
-  const parsed = parseDelivery(buildDemoBundle());
-  const outcome = storeDelivery(parsed, { channel: 'demo', connectionId: null });
-  logInbound('demo', null, parsed.guid, outcome, 'Exempelbeställning (syntetiska data)');
-
-  clearPerformances(parsed.guid);
   const today = startOfToday();
-  for (const activity of parsed.carePlan?.activities ?? []) {
-    const stops = activityStops(parsed.guid, activity.key) ?? [];
-    stops.forEach((due, index) => {
-      if (due.getTime() >= today || skipped(activity.key, index)) return;
-      seedPerformance(parsed.guid, activity.key, index, new Date(due.getTime() + 8 * 60 * 60 * 1000).toISOString());
-    });
+  const start = today - 8 * DAY;
+  const parsed = parseDelivery(buildDemoBundle(today));
+  const outcome = storeDelivery(parsed, { channel: 'demo', connectionId: null });
+  logInbound('demo', null, parsed.guid, outcome, 'Demo request (synthetic data)');
+
+  const patient = parsed.patient.guid;
+  const sr = parsed.guid;
+  clearPerformances(sr);
+  clearPatientAppData(patient);
+  run('UPDATE service_requests SET seen_at = NULL WHERE guid = :guid', { guid: sr });
+
+  // The chat that led to the plan, the day before it started.
+  const before = start - DAY;
+  const chat: [number, 'patient' | 'care-team' | 'system', string][] = [
+    [9.0, 'care-team', 'Hi Andrea! We can see that your blood glucose has been higher than planned lately. How are you?'],
+    [9.4, 'patient', 'Not great. It is hard to keep my routines, and my joints are stiff in the mornings.'],
+    [9.6, 'care-team', 'Thank you for telling us. Would you like more support? We can make a new plan together.'],
+    [9.7, 'patient', 'Yes, please.'],
+    [10.1, 'care-team', 'We are sending you a plan with goals for diabetes, rheumatology and ADHD. You will find it here in the app.'],
+  ];
+  for (const [hour, sender, text] of chat) addMessage(patient, sender, text, null, new Date(before + hour * HOUR).toISOString());
+  addMessage(patient, 'system', 'New plan from the care team', sr, new Date(before + 10.2 * HOUR).toISOString());
+  run('UPDATE service_requests SET seen_at = :at WHERE guid = :guid', { guid: sr, at: new Date(start + 7 * HOUR).toISOString() });
+
+  // What Andrea has done so far, with values, stamped like real reports.
+  const record = (key: string, index: number, due: number, offsetHours: number, values: [string, string, string | null, string | null][]) => {
+    const at = new Date(due + offsetHours * HOUR).toISOString();
+    seedPerformance(sr, key, index, at);
+    for (const [name, value, unit, device] of values) {
+      insertObservation({
+        patientGuid: patient,
+        serviceRequestGuid: sr,
+        activityKey: key,
+        stopIndex: index,
+        name,
+        transactionGuid: null,
+        conceptGuid: name === 'Blood glucose' ? '1c34a590-fc2d-430c-92e6-d123b95fe392' : null,
+        value,
+        unit,
+        recordedAt: at,
+        device,
+        carePlanRef: key.split(':')[0],
+        planDay: Math.floor((due - start) / DAY) + 1,
+        note: null,
+        reportStatus: 'demo',
+        reportMessage: DEMO_NOTE,
+        confirmed: true,
+      });
+    }
+  };
+
+  for (const carePlan of parsed.carePlans) {
+    for (const activity of carePlan.activities) {
+      const stops = activityStops(sr, activity.key) ?? [];
+      stops.forEach((dueDate, index) => {
+        const due = dueDate.getTime();
+        const isToday = due >= today && due < today + DAY;
+        if ((missed[activity.key] ?? []).includes(index)) return;
+        if (activity.key === 'diabetes:glucose' && (due < today || isToday)) {
+          const value = (8.6 - (index / 8) * 2.3 + wobble(index, 0.3)).toFixed(1);
+          record(activity.key, index, due, 7.2, [['Blood glucose', value, 'mmol/L', 'Health (simulated)']]);
+        } else if (due >= today) {
+          return;
+        } else if (activity.key === 'rheumatology:stiffness') {
+          record(activity.key, index, due, 7.5, [['Joint stiffness (0–10)', String(Math.max(2, 5 - Math.floor(index / 2))), null, null]]);
+        } else if (activity.key === 'adhd:evening-check') {
+          record(activity.key, index, due, 19, [
+            ['Sleep', (6.1 + index * 0.14 + wobble(index, 0.2)).toFixed(1), 'h', 'Health (simulated)'],
+            ['Focus (0–10)', String(Math.min(7, 4 + Math.floor(index / 3))), null, null],
+          ]);
+        }
+      });
+    }
   }
-  return getPatientView(parsed.patient.guid)!;
+
+  addMessage(patient, 'care-team', 'We have looked at your values from this week. It looks good. Keep it up!', null, new Date(today - DAY + 15 * HOUR).toISOString());
+  saveIps(patient, buildDemoIps(patient, today), 'IPS via Health Connect (synthetic)', true);
+
+  return getPatientView(patient)!;
 }

@@ -54,6 +54,9 @@ export interface Stop {
 
 export interface ActivityView {
   key: string;
+  /** Which care plan in the request the activity belongs to. */
+  planId: string;
+  planIndex: number;
   title: string;
   description: string | null;
   performerType: string | null;
@@ -83,13 +86,102 @@ export interface ServiceRequestView {
   updatedAt: string;
   ackStatus: string | null;
   hasGrantToken: boolean;
-  carePlan: {
-    title: string | null;
-    description: string | null;
-    status: string | null;
-    goals: Goal[];
-  } | null;
+  /** When the patient opened the plan in the app; null = not yet. */
+  seenAt: string | null;
+  /** One request can carry several longitudinal plans (diabetes, reumatologi …). */
+  carePlans: PlanView[];
   activities: ActivityView[];
+}
+
+export interface PlanView {
+  id: string;
+  title: string | null;
+  description: string | null;
+  status: string | null;
+  goals: Goal[];
+}
+
+// --- The patient app ------------------------------------------------------------
+
+/** How a reported value went: sent to PDHC, failed, or kept in demo mode. */
+export type ReportStatus = 'pending' | 'sent' | 'failed' | 'demo';
+
+export interface ObservationView {
+  id: number;
+  serviceRequestGuid: string;
+  activityKey: string;
+  stopIndex: number | null;
+  name: string;
+  value: string;
+  unit: string | null;
+  recordedAt: string;
+  /** The stamp: patient generated, from which app and device, and where in which plan. */
+  patientReported: boolean;
+  sourceApp: string;
+  device: string | null;
+  carePlanRef: string | null;
+  planDay: number | null;
+  reportStatus: ReportStatus;
+  reportMessage: string | null;
+  /** True when PDHC answered that it recorded the value (or, in demo mode, simulated). */
+  confirmed: boolean;
+}
+
+/**
+ * The patient's clinical summary as an IPS (International Patient Summary,
+ * a FHIR document), fetched through Health Connect, never straight from a CDR.
+ */
+export interface IpsView {
+  fetchedAt: string;
+  source: string;
+  /** True when the summary is synthetic demo data rather than fetched. */
+  synthetic: boolean;
+  problems: { name: string; since: string | null }[];
+  medications: { name: string; dosage: string | null }[];
+  allergies: { name: string; criticality: string | null }[];
+  results: { name: string; value: string; unit: string | null; date: string | null }[];
+}
+
+export interface MessageView {
+  id: number;
+  sender: 'patient' | 'care-team' | 'system';
+  text: string;
+  serviceRequestGuid: string | null;
+  createdAt: string;
+  /** Whether the FHIR message reached the CDR. */
+  cdrStatus: 'not-configured' | 'stored' | 'failed' | null;
+}
+
+export interface AppView {
+  patient: PatientView['patient'];
+  requests: ServiceRequestView[];
+  observations: ObservationView[];
+  ips: IpsView | null;
+  messages: MessageView[];
+}
+
+export interface ReportValue {
+  name: string;
+  value: string;
+  unit?: string;
+  transactionGuid?: string;
+  conceptGuid?: string;
+  /** Where the value came from, e.g. "Hälsa (simulerat)". Empty when the patient typed it. */
+  device?: string;
+}
+
+export interface ReportInput {
+  serviceRequestGuid: string;
+  activityKey: string;
+  stopIndex: number;
+  values: ReportValue[];
+  note?: string;
+}
+
+export interface ReportResult {
+  observations: ObservationView[];
+  reportStatus: ReportStatus;
+  reportMessage: string;
 }
 
 export interface PatientSummary {
@@ -113,6 +205,8 @@ export interface ConnectionView {
   baseUrl: string;
   /** Only the last characters, so the user can tell tokens apart. */
   tokenHint: string;
+  /** Where reports go (gateway.pdhc). */
+  gatewayUrl: string;
   hasPushSecret: boolean;
   pollEnabled: boolean;
   lastTestAt: string | null;

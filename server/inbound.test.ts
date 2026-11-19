@@ -6,7 +6,8 @@ process.env.DATABASE_PATH = ':memory:';
 const { parseDelivery, timingFromPdhcFields, InboundError } = await import('./fhir.ts');
 const { occurrences, describeTiming } = await import('./schedule.ts');
 const { buildDemoBundle, createDemo } = await import('./demo.ts');
-const { storeDelivery, getPatientView } = await import('./store.ts');
+const { storeDelivery, getPatientView, getAppView } = await import('./store.ts');
+const { reportStop } = await import('./report.ts');
 const { normalizeBaseUrl } = await import('./pdhc.ts');
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -48,23 +49,27 @@ test('reads the example from the PDHC provider manual (section 3.2)', () => {
   assert.equal(parsed.contractGuid, 'con-789');
   assert.equal(parsed.grantToken, 'grant-1');
   assert.equal(parsed.title, 'Mobility Assessment');
-  assert.deepEqual(parsed.carePlan?.goals, [{ text: 'Assess range of motion', target: 'Shoulder flexion: degrees' }]);
-  assert.equal(parsed.carePlan?.activities.length, 1);
-  assert.equal(parsed.carePlan?.activities[0].title, 'Measure shoulder flexion bilaterally');
-  assert.equal(parsed.carePlan?.activities[0].status, 'not-started');
-  assert.equal(parsed.carePlan?.activities[0].timing.kind, 'unscheduled');
+  const [plan] = parsed.carePlans;
+  assert.deepEqual(plan.goals, [{ text: 'Assess range of motion', target: 'Shoulder flexion: degrees' }]);
+  assert.equal(plan.activities.length, 1);
+  assert.equal(plan.activities[0].title, 'Measure shoulder flexion bilaterally');
+  assert.equal(plan.activities[0].status, 'not-started');
+  assert.equal(plan.activities[0].timing.kind, 'unscheduled');
 });
 
-test('reads receipt and grant tokens from a push Bundle (section 4.1)', () => {
+test('reads several care plans and the delivery tags from a push Bundle', () => {
   const parsed = parseDelivery(buildDemoBundle());
   assert.equal(parsed.receiptToken, 'demo-receipt');
   assert.equal(parsed.grantToken, 'demo-grant');
-  assert.equal(parsed.carePlan?.activities.length, 5);
   assert.deepEqual(
-    parsed.carePlan?.activities.map((a) => a.key),
-    ['inhalationsteknik', 'dagbok', 'spirometri', 'act', 'uppfoljning'],
+    parsed.carePlans.map((p) => p.title),
+    ['Diabetes', 'Rheumatology', 'ADHD'],
   );
-  assert.deepEqual(parsed.carePlan?.goals.map((g) => g.text), ['Välkontrollerad astma', 'Stabil lungfunktion']);
+  assert.deepEqual(
+    parsed.carePlans.flatMap((p) => p.activities.map((a) => a.key)),
+    ['diabetes:glucose', 'diabetes:follow-up', 'rheumatology:stiffness', 'adhd:evening-check'],
+  );
+  assert.equal(parsed.carePlans[0].goals[0].text, 'Morning blood glucose 4–8 mmol/L');
 });
 
 test("reads plan.pdhc's flat timing fields (live PlanDefinition 'CGM')", () => {
@@ -80,7 +85,7 @@ test("reads plan.pdhc's flat timing fields (live PlanDefinition 'CGM')", () => {
     timing_bounds_count: null,
   });
   assert.deepEqual(timing, { kind: 'repeat', frequency: 1, period: 1, periodUnit: 'd', boundsValue: 3, boundsUnit: 'wk' });
-  assert.equal(describeTiming(timing!), 'En gång per dag i 3 veckor');
+  assert.equal(describeTiming(timing!), 'Once a day for 3 weeks');
 
   const start = new Date('2026-01-01T00:00:00Z');
   const { dates } = occurrences(timing!, start, new Date(start.getTime() + 365 * DAY));
@@ -103,8 +108,8 @@ test('uses the actions of a PlanDefinition when no CarePlan is contained', () =>
       },
     ],
   });
-  assert.equal(parsed.carePlan?.activities[0].title, 'Weekly home spirometry');
-  assert.equal(describeTiming(parsed.carePlan!.activities[0].timing), 'En gång per vecka');
+  assert.equal(parsed.carePlans[0].activities[0].title, 'Weekly home spirometry');
+  assert.equal(describeTiming(parsed.carePlans[0].activities[0].timing), 'Once a week');
 });
 
 test('rejects what is not a ServiceRequest', () => {
@@ -113,22 +118,62 @@ test('rejects what is not a ServiceRequest', () => {
   assert.throws(() => parseDelivery({ resourceType: 'ServiceRequest', id: 'x' }), InboundError); // no patient
 });
 
-test('stores a delivery, recognises it unchanged, and keeps done stops when it changes', () => {
+test('stores the demo, recognises it unchanged, and keeps done stops when it changes', () => {
   const view = createDemo();
   const request = view.requests[0];
-  const diary = request.activities.find((a) => a.key === 'dagbok')!;
-  assert.equal(diary.stops.length, 84); // twelve weeks, every day
-  const done = diary.stops.filter((s) => s.performedAt).length;
-  assert.ok(done > 20 && done < 35, `expected some done stops, got ${done}`);
+  assert.equal(request.carePlans.length, 3);
+  const glucose = request.activities.find((a) => a.key === 'diabetes:glucose')!;
+  assert.equal(glucose.planId, 'diabetes');
+  assert.equal(glucose.stops.length, 84); // twelve weeks, every day
+  const done = glucose.stops.filter((s) => s.performedAt).length;
+  assert.equal(done, 8); // eight days so far, one missed, plus this morning
 
   const bundle = buildDemoBundle();
   assert.equal(storeDelivery(parseDelivery(bundle), { channel: 'demo', connectionId: null }), 'unchanged');
 
-  (bundle.entry[0].resource.contained[3] as { title: string }).title = 'Astma – ny version';
+  (bundle.entry[0].resource.contained[4] as { title: string }).title = 'Diabetes, revised';
   assert.equal(storeDelivery(parseDelivery(bundle), { channel: 'demo', connectionId: null }), 'updated');
   const after = getPatientView(view.patient.guid)!.requests[0];
-  assert.equal(after.carePlan?.title, 'Astma – ny version');
-  assert.equal(after.activities.find((a) => a.key === 'dagbok')!.stops.filter((s) => s.performedAt).length, done);
+  assert.equal(after.carePlans[0].title, 'Diabetes, revised');
+  assert.equal(after.activities.find((a) => a.key === 'diabetes:glucose')!.stops.filter((s) => s.performedAt).length, done);
+});
+
+test('the patient app view has the history, the chat and the IPS', () => {
+  const view = createDemo();
+  const app = getAppView(view.patient.guid)!;
+  assert.ok(app.observations.length > 10);
+  assert.ok(app.observations.every((o) => o.patientReported && o.sourceApp === 'MMD'));
+  assert.equal(app.messages.filter((m) => m.sender === 'system').length, 1);
+  assert.equal(app.ips?.synthetic, true);
+  assert.deepEqual(app.ips?.problems.map((p) => p.name), ['Type 2 diabetes', 'Rheumatoid arthritis', 'ADHD']);
+  assert.equal(app.ips?.results[0].name, 'HbA1c');
+});
+
+test('reporting a stop stamps the values and keeps a demo request in demo mode', async () => {
+  const view = createDemo();
+  const request = view.requests[0];
+  const stiffness = request.activities.find((a) => a.key === 'rheumatology:stiffness')!;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const stop = stiffness.stops.find((s) => Date.parse(s.dueAt) >= today.getTime() && !s.performedAt)!;
+
+  const result = await reportStop(view.patient.guid, {
+    serviceRequestGuid: request.guid,
+    activityKey: stiffness.key,
+    stopIndex: stop.index,
+    values: [{ name: 'Joint stiffness (0–10)', value: '3' }],
+  });
+  assert.equal(result.reportStatus, 'demo');
+  assert.equal(result.observations[0].carePlanRef, 'rheumatology');
+  assert.equal(result.observations[0].planDay, 9);
+  assert.equal(result.observations[0].confirmed, true);
+  const after = getPatientView(view.patient.guid)!.requests[0].activities.find((a) => a.key === stiffness.key)!;
+  assert.ok(after.stops[stop.index].performedAt);
+
+  await assert.rejects(
+    reportStop(view.patient.guid, { serviceRequestGuid: request.guid, activityKey: stiffness.key, stopIndex: 40, values: [] }),
+    /future/,
+  );
 });
 
 test('normalises the connection URL', () => {

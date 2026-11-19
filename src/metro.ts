@@ -47,11 +47,11 @@ export function stationState(stops: Stop[], today: number): StationState {
 }
 
 export const STATE_LABEL: Record<StationState, string> = {
-  done: 'Utförd',
-  partial: 'Delvis utförd',
-  missed: 'Missad',
-  today: 'I dag',
-  planned: 'Kommande',
+  done: 'Done',
+  partial: 'Partly done',
+  missed: 'Missed',
+  today: 'Today',
+  planned: 'Coming',
 };
 
 export function buildLines(request: ServiceRequestView, groupDays: number, today: number): Line[] {
@@ -71,7 +71,7 @@ export function buildLines(request: ServiceRequestView, groupDays: number, today
       const last = Math.max(...times);
       let label: string;
       if (stops.length === 1) label = formatLong(first);
-      else if (groupDays === 7) label = `Vecka ${isoWeek(first)}, ${formatShort(first)} – ${formatShort(last)}`;
+      else if (groupDays === 7) label = `Week ${isoWeek(first)}, ${formatShort(first)} – ${formatShort(last)}`;
       else label = `${formatShort(first)} – ${formatShort(last)}`;
       return {
         id: `${activity.key}:${key}`,

@@ -148,7 +148,7 @@ export function MetroMap({ request, selectedId, onSelect }: Props) {
   const groupHint =
     groupDays === 0
       ? undefined
-      : `Täta linjer visar en hållplats per ${groupDays === 7 ? 'vecka' : `${groupDays} dagar`}.`;
+      : `Dense lines show one stop per ${groupDays === 7 ? 'week' : `${groupDays} days`}.`;
 
   return (
     <div className="metro-wrap">
@@ -159,7 +159,7 @@ export function MetroMap({ request, selectedId, onSelect }: Props) {
         height={height}
         viewBox={`0 0 ${width} ${height}`}
         role="group"
-        aria-label={`Vårdplanen som tunnelbanekarta, ${formatShort(start)} till ${formatShort(end)}`}
+        aria-label={`The care plan as a metro map, ${formatShort(start)} to ${formatShort(end)}`}
       >
         {/* Grid and time axis */}
         {ticks.map((tick) => (
@@ -177,7 +177,7 @@ export function MetroMap({ request, selectedId, onSelect }: Props) {
             <line x1={xOf(now)} x2={xOf(now)} y1={30} y2={axisY - 16} />
             <rect x={xOf(now) - 24} y={8} width={48} height={22} rx={11} />
             <text x={xOf(now)} y={23} textAnchor="middle">
-              I dag
+              Today
             </text>
           </g>
         )}
@@ -223,7 +223,7 @@ export function MetroMap({ request, selectedId, onSelect }: Props) {
         {/* Start and Goal */}
         {[
           { x: xStart, title: 'Start', date: start },
-          { x: xEnd, title: 'Mål', date: end },
+          { x: xEnd, title: 'Goal', date: end },
         ].map((terminal) => (
           <g key={terminal.title} className="terminal">
             <rect
@@ -247,7 +247,7 @@ export function MetroMap({ request, selectedId, onSelect }: Props) {
           line.stations.map((station) => {
             const selected = station.id === selectedId;
             const label = `${line.activity.title}, ${station.label}: ${STATE_LABEL[station.state]}${
-              station.stops.length > 1 ? `, ${station.doneCount} av ${station.stops.length} utförda` : ''
+              station.stops.length > 1 ? `, ${station.doneCount} of ${station.stops.length} done` : ''
             }`;
             return (
               <g
@@ -279,14 +279,14 @@ export function MetroMap({ request, selectedId, onSelect }: Props) {
 /** The key under the map. */
 export function MetroLegend({ groupHint }: { groupHint?: string }) {
   const items: { state: Station['state']; text: string }[] = [
-    { state: 'done', text: 'Utförd' },
-    { state: 'today', text: 'I dag' },
-    { state: 'planned', text: 'Kommande' },
-    { state: 'partial', text: 'Delvis utförd' },
-    { state: 'missed', text: 'Missad' },
+    { state: 'done', text: 'Done' },
+    { state: 'today', text: 'Today' },
+    { state: 'planned', text: 'Coming' },
+    { state: 'partial', text: 'Partly done' },
+    { state: 'missed', text: 'Missed' },
   ];
   return (
-    <ul className="legend" aria-label="Teckenförklaring">
+    <ul className="legend" aria-label="Key">
       {items.map((item) => (
         <li key={item.state}>
           <svg width={24} height={24} viewBox="-12 -12 24 24" aria-hidden="true" className="metro">
