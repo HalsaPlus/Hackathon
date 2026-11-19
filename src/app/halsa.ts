@@ -212,6 +212,23 @@ export async function writeRatingToHalsa(patientGuid: string, type: HalsaSeries,
   return result.status === 'error' ? result.message : null;
 }
 
+/**
+ * A PDHC concept name as people read it: "systolic-blood-pressure" →
+ * "Systolic blood pressure", "sleep-duration" → "Sleep duration", "CGM" →
+ * "Glucose (CGM)". Only for display; what is stored and sent to PDHC keeps
+ * the concept's own name. Names that are already text (with spaces) stay.
+ */
+export function conceptLabel(transaction: { name: string; conceptGuid?: string }): string {
+  const series = halsaSeriesFor(transaction);
+  if (series) return series === 'sleep' ? 'Sleep duration' : HALSA_SERIES[series].label;
+  const name = transaction.name.trim();
+  if (/^[a-z0-9]+([-_][a-z0-9]+)+$/.test(name)) {
+    const words = name.replace(/[-_]+/g, ' ');
+    return words.charAt(0).toUpperCase() + words.slice(1);
+  }
+  return transaction.name;
+}
+
 /** The plan's data in plain words, each once ("CGM glucose, sleep, blood pressure …"), for the consent card. */
 export function requestedData(request: { activities: { transactions: Transaction[] }[] }): string[] {
   const names = request.activities.flatMap((a) =>

@@ -3,7 +3,7 @@ import { halsaDevice } from '../../../shared/halsa.ts';
 import type { ObservationView, ReportResult, Transaction } from '../../../shared/types.ts';
 import { call } from '../../api.ts';
 import type { ScreenProps } from '../App.tsx';
-import { halsaReading, maySend, prefilledValue, useHalsaConsent, useStopHalsa, writeRatingToHalsa } from '../halsa.ts';
+import { conceptLabel, halsaReading, maySend, prefilledValue, useHalsaConsent, useStopHalsa, writeRatingToHalsa } from '../halsa.ts';
 import { isRating, simulate, simulationFor, SIMULATED_DEVICE } from '../healthkit.ts';
 import { CheckIcon, HeartIcon } from '../icons.tsx';
 import { DAY, formatClock, formatLong, observationsFor, planColor, planDay, stopState } from '../model.ts';
@@ -45,7 +45,7 @@ function Receipt({ observations, planTitle, message }: { observations: Observati
       <ul className="list" style={{ gap: 4 }}>
         {observations.map((o) => (
           <li key={o.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-            <span className="muted">{o.name}</span>
+            <span className="muted">{conceptLabel(o)}</span>
             <strong>
               {o.value === 'done' ? 'Done' : o.value} {o.unit ?? ''}
             </strong>
@@ -210,7 +210,7 @@ export function MeasureScreen({ view, today, refresh, patientGuid, requestGuid, 
                 <section key={t.name} className="card" aria-labelledby={id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h2 id={id} style={{ color }}>
-                      {t.name}
+                      {conceptLabel(t)}
                     </h2>
                     {t.rangeMin !== undefined && t.rangeMax !== undefined && Number(valueOf(t)) >= t.rangeMin && Number(valueOf(t)) <= t.rangeMax && (
                       <span className="chip">In range</span>
@@ -244,7 +244,7 @@ export function MeasureScreen({ view, today, refresh, patientGuid, requestGuid, 
                 <section key={t.name} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10, borderColor: `${color}88` }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12 }}>
                     <label htmlFor={id} style={{ fontWeight: 700 }}>
-                      {scale ? reading.label : t.name.replace(/\s*\(0\s*[–-]\s*10\)/, '')}
+                      {scale ? reading.label : conceptLabel(t).replace(/\s*\(0\s*[–-]\s*10\)/, '')}
                     </label>
                     <span style={{ fontSize: 30, fontWeight: 700, whiteSpace: 'nowrap' }}>
                       {valueOf(t) || '–'}
@@ -273,7 +273,7 @@ export function MeasureScreen({ view, today, refresh, patientGuid, requestGuid, 
             return (
               <section key={t.name} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <label htmlFor={id} style={{ fontWeight: 700 }}>
-                  {t.name}
+                  {conceptLabel(t)}
                   {t.unit ? ` (${t.unit})` : ''}
                 </label>
                 <input
