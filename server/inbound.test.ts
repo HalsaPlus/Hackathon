@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 // Use a throwaway database. Must be set before store.ts (and db.ts) load.
 process.env.DATABASE_PATH = ':memory:';
-const { parseDelivery, timingFromPdhcFields, InboundError } = await import('./fhir.ts');
+const { parseDelivery, timingFromFhir, timingFromPdhcFields, InboundError } = await import('./fhir.ts');
 const { occurrences, describeTiming } = await import('./schedule.ts');
 const { buildDemoBundle, createDemo } = await import('./demo.ts');
 const { storeDelivery, getPatientView, getAppView } = await import('./store.ts');
@@ -276,6 +276,85 @@ test('only fetches plan templates from plan.pdhc', () => {
 
 test('a template activity with no timing is not read as daily', () => {
   assert.equal(timingFromPdhcFields(noTiming), undefined);
+});
+
+// The same template as plan.pdhc renders it in FHIR R5 (shape from PDHC,
+// 2026-11-19, shortened): concepts as nested actions, timing as Timing with
+// only `duration` for a single occasion, and the performer in participant.role.
+const concepts = (...items: [string, string][]) =>
+  items.map(([guid, title]) => ({
+    title,
+    _pdhc_concept_guid: guid,
+    requiredBehavior: 'required',
+    definitionCanonical: `https://plan.pdhc.se/api/v1/concepts/${guid}`,
+  }));
+const role = (text: string) => [{ type: 'practitioner', role: { text } }];
+const FHIR_TEMPLATE = {
+  resourceType: 'PlanDefinition',
+  id: 'pd-fhir',
+  title: 'MMD_plan',
+  goal: [
+    {
+      description: { text: 'cgm_mean_glucose' },
+      target: [{ detailRange: { low: { value: 4, unit: 'mmol/L' }, high: { value: 8, unit: 'mmol/L' } } }],
+    },
+  ],
+  action: [
+    { title: 'CGM', participant: role('Patient'), timingTiming: { repeat: { duration: 40, durationUnit: 'd' } }, action: concepts(['c-cgm', 'CGM']) },
+    {
+      title: 'Sleep',
+      description: 'rapportera sömntid',
+      participant: role('Patient'),
+      timingTiming: { repeat: { frequency: 1, period: 1, periodUnit: 'd', duration: 1, durationUnit: 'min' } },
+      action: concepts(['c-sleep', 'sleep-duration']),
+    },
+    {
+      title: 'Veckorapport',
+      participant: role('Practitioner'),
+      action: concepts(['c-sys', 'systolic-blood-pressure'], ['c-dia', 'diastolic-blood-pressure'], ['c-stress', 'stress']),
+    },
+  ],
+};
+
+test("reads plan.pdhc's FHIR PlanDefinition: nested concepts, a single occasion, the participant's role", () => {
+  const parsed = parseDelivery({ resourceType: 'ServiceRequest', id: 'sr-fhir', subject: { reference: 'Patient/p-fhir' }, contained: [FHIR_TEMPLATE] });
+  const [plan] = parsed.carePlans;
+  assert.deepEqual(
+    plan.activities.map((a) => [a.title, describeTiming(a.timing), a.performerType, a.transactions.map((t) => t.conceptGuid)]),
+    [
+      ['CGM', 'Once', 'Patient', ['c-cgm']],
+      ['Sleep', 'Once a day', 'Patient', ['c-sleep']],
+      // The FHIR rendering has no schedule for this one, and nothing is made up.
+      ['Veckorapport', describeTiming({ kind: 'unscheduled' }), 'Practitioner', ['c-sys', 'c-dia', 'c-stress']],
+    ],
+  );
+  assert.deepEqual(plan.activities[0].transactions, [{ conceptGuid: 'c-cgm', name: 'CGM', requirement: 'required' }]);
+  assert.deepEqual(plan.goals, [{ text: 'cgm_mean_glucose', target: '4–8 mmol/L' }]);
+});
+
+test('fills in a delivery from a FHIR plan template too', async () => {
+  const parsed = parseDelivery(pdhcDelivery(), { patientGuid: 'p-real' });
+  const problems = await applyPlanTemplates(parsed, async () => FHIR_TEMPLATE);
+  assert.deepEqual(problems, []);
+  assert.deepEqual(
+    parsed.carePlans[0].activities.map((a) => [a.key, a.title, describeTiming(a.timing), a.performerType]),
+    [
+      ['1-cgm', 'CGM', 'Once', 'Patient'],
+      ['2-sleep-duration', 'Sleep', 'Once a day', 'Patient'],
+      ['3-systolic-blood-pressure-diastolic-blood', 'Veckorapport', describeTiming({ kind: 'unscheduled' }), 'Practitioner'],
+    ],
+  );
+  assert.equal(parsed.carePlans[0].activities[2].transactions[0].requirement, 'required');
+});
+
+test('a FHIR Timing with only a duration is one occasion, not a daily one', () => {
+  assert.deepEqual(timingFromFhir({ repeat: { duration: 40, durationUnit: 'd' } }), { kind: 'once' });
+  assert.deepEqual(timingFromFhir({ repeat: { duration: 5, durationUnit: 'min', period: 1, periodUnit: 'wk' } }), {
+    kind: 'repeat',
+    frequency: 1,
+    period: 1,
+    periodUnit: 'wk',
+  });
 });
 
 test('rejects what is not a ServiceRequest', () => {
