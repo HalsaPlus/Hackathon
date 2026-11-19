@@ -1,0 +1,24 @@
+{
+  "name": "halsa-plus-demo-api",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Simulerad Hälsa+-backend för Nordic Hackathon 2026 – bara syntetiska data",
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "node --watch-path=src src/index.ts",
+    "start": "node src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test src/*.test.ts"
+  },
+  "dependencies": {
+    "express": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2"
+  }
+}
