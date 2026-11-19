@@ -195,18 +195,20 @@ function ConnectionCard({
   const [busy, setBusy] = useState<'test' | 'sync' | 'delete' | 'report' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [testReport, setTestReport] = useState<TestReportResult[] | null>(null);
+  const [onePerReport, setOnePerReport] = useState(true);
 
   const sendTestReport = async () => {
     const ok = window.confirm(
       `Send synthetic test observations to PDHC for every open request from "${connection.name}"?\n\n` +
-        'One set of values per activity goes to gateway.pdhc as if the patient had reported it, marked as test data. ' +
+        'One set of values per activity goes to gateway.pdhc as if the patient had reported it, marked as test data' +
+        (onePerReport ? ', each value in a report of its own. ' : ', all values of an activity in one report. ') +
         "The values are also saved in MMD and mark the stop as done in the patient's app.",
     );
     if (!ok) return;
     setBusy('report');
     setError(null);
     try {
-      setTestReport(await api.sendTestReport(connection.id));
+      setTestReport(await api.sendTestReport(connection.id, onePerReport));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Sending the test observations failed.');
     } finally {
@@ -315,6 +317,10 @@ function ConnectionCard({
               Remove
             </button>
           </div>
+          <label className="check">
+            <input type="checkbox" checked={onePerReport} onChange={(e) => setOnePerReport(e.target.checked)} />
+            Test observations: one value per report, each with its own time
+          </label>
 
           {testReport && <TestReportTable results={testReport} />}
         </>
@@ -331,17 +337,50 @@ const REPORT_OUTCOMES: Record<TestReportResult['status'], { label: string; tone:
   skipped: { label: 'Skipped', tone: '' },
 };
 
+/** Exactly what went to gateway.pdhc, to compare with what PDHC shows (no grant token or PAT). */
+function forPdhc(results: TestReportResult[]) {
+  return JSON.stringify(
+    results
+      .filter((r) => r.sent.length)
+      .map((r) => ({
+        service_request_guid: r.serviceRequestGuid,
+        activity: r.activity,
+        reports: r.sent.map((s) => ({ receipt_guid: s.receiptGuid, observations_stored: s.stored, answer: s.message, observations: s.observations })),
+      })),
+    null,
+    2,
+  );
+}
+
 /** What the test button sent, per request and activity, and what PDHC answered. */
 function TestReportTable({ results }: { results: TestReportResult[] }) {
+  const [copied, setCopied] = useState(false);
   if (results.length === 0) {
     return <p className="notice">No open requests from this connection, so nothing was sent.</p>;
   }
   const sent = results.filter((r) => r.status === 'sent').length;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(forPdhc(results));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard can be blocked; the table shows the same.
+    }
+  };
+  /** The call a value went in, found by its transaction GUID. */
+  const callFor = (r: TestReportResult, transactionGuid: string | null) =>
+    r.sent.find((s) => s.observations.some((o) => o.transaction_guid === transactionGuid));
   return (
     <section className="test-report" aria-label="Test observations sent">
-      <h3>
-        Test observations: {sent} of {results.length} {results.length === 1 ? 'activity' : 'activities'} sent
-      </h3>
+      <header className="connection-header">
+        <h3>
+          Test observations: {sent} of {results.length} {results.length === 1 ? 'activity' : 'activities'} sent
+        </h3>
+        <button type="button" className="button subtle" onClick={() => void copy()}>
+          {copied ? 'Copied' : 'Copy what was sent'}
+        </button>
+      </header>
       <div className="table-scroll">
         <table className="table">
           <thead>
@@ -374,12 +413,16 @@ function TestReportTable({ results }: { results: TestReportResult[] }) {
                 <td>
                   {r.values.length === 0
                     ? '–'
-                    : r.values.map((v) => (
-                        <div key={v.name}>
-                          {v.name}: <strong>{v.value}</strong> {v.unit ?? ''}
-                          {v.transactionGuid && <span className="mono small muted"> ({v.transactionGuid.slice(0, 8)}…)</span>}
-                        </div>
-                      ))}
+                    : r.values.map((v) => {
+                        const call = callFor(r, v.transactionGuid);
+                        return (
+                          <div key={v.name}>
+                            {v.name}: <strong>{v.value}</strong> {v.unit ?? ''}
+                            {v.transactionGuid && <span className="mono small muted"> tx {v.transactionGuid.slice(0, 8)}…</span>}
+                            {call?.receiptGuid && <span className="mono small muted"> · receipt {call.receiptGuid.slice(0, 8)}…</span>}
+                          </div>
+                        );
+                      })}
                 </td>
                 <td>
                   <span className={`pill ${REPORT_OUTCOMES[r.status].tone}`}>{REPORT_OUTCOMES[r.status].label}</span>

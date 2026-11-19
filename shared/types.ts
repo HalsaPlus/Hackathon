@@ -193,6 +193,19 @@ export interface ReportResult {
   observations: ObservationView[];
   reportStatus: ReportStatus;
   reportMessage: string;
+  /** Each call to gateway.pdhc: exactly what it carried and what PDHC answered. Empty in demo mode. */
+  sent?: SentReport[];
+}
+
+/** One POST to gateway.pdhc /provider/report/{sr}, without the grant token. */
+export interface SentReport {
+  observations: { name: string; transaction_guid: string; value: string | number; recorded_at: string; notes?: string }[];
+  /** True when PDHC answered that it took the values (status accepted or recorded). */
+  received: boolean;
+  receiptGuid: string | null;
+  /** observations_stored in PDHC's answer. */
+  stored: number | null;
+  message: string;
 }
 
 /** One activity's test values from the admin console, and what PDHC answered. */
@@ -207,6 +220,8 @@ export interface TestReportResult {
   values: { name: string; value: string; unit: string | null; transactionGuid: string | null }[];
   status: ReportStatus | 'skipped';
   message: string;
+  /** The calls to gateway.pdhc, to compare with what PDHC shows. */
+  sent: SentReport[];
 }
 
 export interface PatientSummary {

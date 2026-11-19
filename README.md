@@ -59,7 +59,7 @@ PDHC delivers requests in two ways, and the app handles both:
 
 Reports from the patient app go to `POST /provider/report/{sr}` on gateway.pdhc, with the PAT and the request's `grant_token`. Numeric values are sent as JSON numbers; the gateway refuses text with 422. It answers 202 with `status: accepted` and a receipt per report. A demo request stays in demo mode, and the app says so.
 
-To try the round trip, press **Send test observations** on the connection. For every open request it sends one set of synthetic values per activity, varied and now and then outside the plan's range, exactly as if the patient had reported them, with a note saying it is test data. The table under the button shows each value, its `transaction_guid` and PDHC's receipt.
+To try the round trip, press **Send test observations** on the connection. For every open request it sends one set of synthetic values per activity, varied and now and then outside the plan's range, exactly as if the patient had reported them. No two parameters get the same value in one click, and each value's note says it is test data and which parameter it was meant for (`… systolic-blood-pressure = 135 mmHg`), so a value that ends up on the wrong parameter at PDHC can be traced. By default each value goes in a report of its own with its own `recorded_at`; untick the box to send all of an activity's values in one report, as the patient app does. The table under the button shows each value, its `transaction_guid` and PDHC's receipt, and **Copy what was sent** copies the exact payloads (without the grant token) to share with PDHC.
 
 ## Other services
 

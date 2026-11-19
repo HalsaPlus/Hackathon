@@ -1,5 +1,4 @@
-import type { ReportInput, ReportResult, ReportStatus, Transaction } from '../shared/types.ts';
-import { now } from './db.ts';
+import type { ReportInput, ReportResult, ReportStatus, SentReport, Transaction } from '../shared/types.ts';
 import { gatewayValue, reportToGateway } from './pdhc.ts';
 import {
   activityStops,
@@ -33,7 +32,15 @@ function clean(value: unknown, max: number) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
 }
 
-export async function reportStop(patientGuid: string, input: ReportInput): Promise<ReportResult> {
+/** Only for reports MMD makes itself (the admin console's test button), never from the patient app's input. */
+export interface ReportOptions {
+  /** Send each value in a report of its own, with its own recorded_at. */
+  onePerReport?: boolean;
+  /** A note per value instead of the one in the input. */
+  noteFor?: (value: { name: string; value: string; unit: string | null }) => string;
+}
+
+export async function reportStop(patientGuid: string, input: ReportInput, options: ReportOptions = {}): Promise<ReportResult> {
   const request = getServiceRequestRow(clean(input.serviceRequestGuid, 100));
   if (!request || request.patient_guid !== patientGuid) throw new ReportError('The plan was not found.', 404);
   if (isClosed(request)) throw new ReportError('This plan has been closed by the care team, so it no longer takes reports.', 409);
@@ -62,11 +69,15 @@ export async function reportStop(patientGuid: string, input: ReportInput): Promi
   if (values.length === 0) values.push({ name: activity.title, value: 'done', unit: null, transactionGuid: null, responseType: undefined, conceptGuid: null, device: null });
   if (values.some((v) => !v.value)) throw new ReportError('Every value needs to be filled in.');
 
-  const recordedAt = now();
-  const planDay = Math.floor((Date.now() - Date.parse(request.period_start)) / DAY) + 1;
+  const startedAt = Date.now();
+  const planDay = Math.floor((startedAt - Date.parse(request.period_start)) / DAY) + 1;
   const note = clean(input.note, 500) || null;
-  const ids = values.map((v) =>
-    insertObservation({
+  const stored = values.map((v, i) => {
+    // One value per report: each gets its own time, a second apart, so no two
+    // values from the same stop share recorded_at at PDHC.
+    const recordedAt = options.onePerReport ? new Date(startedAt + i * 1000).toISOString() : new Date(startedAt).toISOString();
+    const valueNote = options.noteFor?.(v) ?? note;
+    const id = insertObservation({
       patientGuid,
       serviceRequestGuid: request.guid,
       activityKey: activity.activity_key,
@@ -80,61 +91,94 @@ export async function reportStop(patientGuid: string, input: ReportInput): Promi
       device: v.device,
       carePlanRef: activity.plan_fhir_id,
       planDay,
-      note,
+      note: valueNote,
       reportStatus: 'pending',
       reportMessage: null,
       confirmed: false,
-    }),
-  );
+    });
+    return { ...v, id, recordedAt, note: valueNote };
+  });
+  const ids = stored.map((v) => v.id);
   setPerformed(request.guid, activity.activity_key, index, true);
 
-  let status: ReportStatus;
-  let message: string;
-  let confirmed = false;
   const connection = request.connection_id !== null ? getConnection(request.connection_id) : undefined;
-
   if (request.source === 'demo' || !connection) {
-    status = 'demo';
-    message = 'Demo mode: not sent to PDHC. The confirmation is simulated.';
-    confirmed = true;
-  } else if (!request.grant_token) {
-    status = 'failed';
-    message = 'No grant_token for this plan, so PDHC cannot accept the report.';
-  } else {
-    // The gateway matches each value to the plan by transaction_guid. plan.pdhc
-    // does not always send one; the concept GUID is the closest fallback
-    // (interpretation, to verify against a real delivery).
-    const sendable = values.filter((v) => v.transactionGuid || v.conceptGuid);
-    if (sendable.length === 0) {
-      status = 'failed';
-      message = 'The plan has no transaction or concept ids for these values, so they cannot be matched in PDHC.';
-    } else {
-      try {
-        const answer = await reportToGateway(connection, gatewayUrlOf(connection), request.guid, {
-          patient_guid: request.patient_guid,
-          grant_token: request.grant_token,
-          status: 'in-progress',
-          report_payload: {
-            observations: sendable.map((v) => ({
-              transaction_guid: (v.transactionGuid ?? v.conceptGuid)!,
-              value: gatewayValue(v.value, v.responseType),
-              recorded_at: recordedAt,
-              ...(note ? { notes: note } : {}),
-            })),
-          },
-        });
-        status = 'sent';
-        confirmed = answer.received;
-        message = confirmed
-          ? `Received by PDHC${answer.receiptGuid ? ` (receipt ${answer.receiptGuid})` : ''}.`
-          : `Sent. PDHC answered "${answer.status}".`;
-      } catch (error) {
-        status = 'failed';
-        message = error instanceof Error ? error.message : 'Sending to PDHC failed.';
-      }
-    }
+    const message = 'Demo mode: not sent to PDHC. The confirmation is simulated.';
+    setReportOutcome(ids, 'demo', message, true);
+    return { observations: getObservations(ids), reportStatus: 'demo', reportMessage: message, sent: [] };
+  }
+  if (!request.grant_token) {
+    const message = 'No grant_token for this plan, so PDHC cannot accept the report.';
+    setReportOutcome(ids, 'failed', message, false);
+    return { observations: getObservations(ids), reportStatus: 'failed', reportMessage: message, sent: [] };
   }
 
-  setReportOutcome(ids, status, message, confirmed);
-  return { observations: getObservations(ids), reportStatus: status, reportMessage: message };
+  // The gateway matches each value to the plan by transaction_guid; without
+  // one, the concept GUID is the closest fallback (not tried against PDHC).
+  const sendable = stored.filter((v) => v.transactionGuid || v.conceptGuid);
+  if (sendable.length === 0) {
+    const message = 'The plan has no transaction or concept ids for these values, so they cannot be matched in PDHC.';
+    setReportOutcome(ids, 'failed', message, false);
+    return { observations: getObservations(ids), reportStatus: 'failed', reportMessage: message, sent: [] };
+  }
+
+  const batches = options.onePerReport ? sendable.map((v) => [v]) : [sendable];
+  const sent: SentReport[] = [];
+  let failed = 0;
+  for (const batch of batches) {
+    const observations = batch.map((v) => ({
+      name: v.name,
+      transaction_guid: (v.transactionGuid ?? v.conceptGuid)!,
+      value: gatewayValue(v.value, v.responseType),
+      recorded_at: v.recordedAt,
+      ...(v.note ? { notes: v.note } : {}),
+    }));
+    let report: SentReport;
+    let threw = false;
+    try {
+      const answer = await reportToGateway(connection, gatewayUrlOf(connection), request.guid, {
+        patient_guid: request.patient_guid,
+        grant_token: request.grant_token,
+        status: 'in-progress',
+        report_payload: { observations: observations.map(({ name: _name, ...o }) => o) },
+      });
+      const details = [answer.receiptGuid && `receipt ${answer.receiptGuid}`, answer.stored !== null && `${answer.stored} stored`].filter(Boolean);
+      report = {
+        observations,
+        received: answer.received,
+        receiptGuid: answer.receiptGuid,
+        stored: answer.stored,
+        message: answer.received
+          ? `Received by PDHC${details.length ? ` (${details.join(', ')})` : ''}.`
+          : `Sent. PDHC answered "${answer.status}".`,
+      };
+    } catch (error) {
+      threw = true;
+      failed += 1;
+      report = {
+        observations,
+        received: false,
+        receiptGuid: null,
+        stored: null,
+        message: error instanceof Error ? error.message : 'Sending to PDHC failed.',
+      };
+    }
+    sent.push(report);
+    // Every value carries the outcome of the call it went in.
+    setReportOutcome(
+      batch.map((v) => v.id),
+      threw ? 'failed' : 'sent',
+      report.message,
+      report.received,
+    );
+  }
+
+  const status: ReportStatus = failed === sent.length ? 'failed' : 'sent';
+  const message =
+    sent.length === 1
+      ? sent[0].message
+      : failed === 0
+        ? `Received by PDHC: ${sent.filter((s) => s.received).length} of ${sent.length} reports.`
+        : `${failed} of ${sent.length} reports failed: ${sent.find((s) => !s.received)?.message ?? ''}`;
+  return { observations: getObservations(ids), reportStatus: status, reportMessage: message, sent };
 }
