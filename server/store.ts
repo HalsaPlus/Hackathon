@@ -179,7 +179,13 @@ export interface StoreOptions {
 }
 
 function checksumOf(parsed: ParsedDelivery) {
-  const content = JSON.stringify([parsed.serviceRequest, parsed.carePlans.map((p) => p.fhir), parsed.patient.fhir ?? null]);
+  // The activities are included because they also depend on the plan template
+  // on plan.pdhc, which can change, or be readable now when it was not before.
+  const content = JSON.stringify([
+    parsed.serviceRequest,
+    parsed.carePlans.map((p) => [p.fhir, p.activities]),
+    parsed.patient.fhir ?? null,
+  ]);
   return createHash('sha256').update(content).digest('hex');
 }
 

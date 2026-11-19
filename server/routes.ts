@@ -5,6 +5,7 @@ import { now, run } from './db.ts';
 import { createDemo } from './demo.ts';
 import { InboundError, parseDelivery } from './fhir.ts';
 import { normalizeBaseUrl, PdhcError, testConnection } from './pdhc.ts';
+import { applyPlanTemplates } from './plandefinition.ts';
 import { fetchIpsFromHealthConnect } from './ips.ts';
 import { sendToCdr } from './messaging.ts';
 import { ReportError, reportStop } from './report.ts';
@@ -47,7 +48,7 @@ function operationOutcome(code: string, diagnostics: string) {
  * Must be registered before setupAuth(), since PDHC has no login session.
  */
 export function setupPushEndpoint(app: Express) {
-  app.post('/api/v1/inbound/push', json, (req: Request, res: Response) => {
+  app.post('/api/v1/inbound/push', json, async (req: Request, res: Response) => {
     const secret = req.get('X-Push-Secret') ?? '';
     const connection = secret
       ? listConnections().find((c) => c.push_secret && safeEqual(secret, c.push_secret))
@@ -59,8 +60,9 @@ export function setupPushEndpoint(app: Express) {
 
     try {
       const parsed = parseDelivery(req.body);
+      const problems = await applyPlanTemplates(parsed);
       const outcome = storeDelivery(parsed, { channel: 'push', connectionId: connection.id });
-      logInbound('push', connection.id, parsed.guid, outcome, null);
+      logInbound('push', connection.id, parsed.guid, outcome, problems.join(' ') || null);
       res.status(202).json({ status: 'accepted', service_request_guid: parsed.guid, outcome });
       if (parsed.receiptToken) void acknowledgePush(connection, parsed.guid, parsed.receiptToken);
     } catch (error) {

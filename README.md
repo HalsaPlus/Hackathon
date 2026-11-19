@@ -73,6 +73,7 @@ The chat is also available as FHIR for the control tower: `GET /api/fhir/Communi
 
 - **Server:** Express, in `server/`.
   - `fhir.ts` parses the request and its care plans.
+  - `plandefinition.ts` fills in each activity's title, schedule and transactions from the plan template on plan.pdhc.
   - `store.ts` stores everything in SQLite.
   - `report.ts` and `pdhc.ts` report to PDHC.
   - `messaging.ts` turns the chat into FHIR messaging.
@@ -84,6 +85,6 @@ The chat is also available as FHIR for the control tower: `GET /api/fhir/Communi
 
 ## Open questions
 
-- **Schedules:** how PDHC writes an activity's schedule inside the delivered CarePlan is not documented. The parser accepts FHIR `Timing` and plan.pdhc's `timing_*` fields.
-- **Matching values:** the gateway matches values by `transaction_guid`. plan.pdhc does not always send one, so the concept GUID is used as a fallback.
+- **Schedules:** answered by the first real delivery. The CarePlan only lists the concepts each activity measures (`performedActivity`). The schedule, titles, ranges and `transaction_guid` come from the plan template in `instantiatesCanonical` on plan.pdhc. If plan.pdhc cannot be reached, the request is stored without a schedule and the inbound log says so.
+- **Matching values:** the gateway matches values by `transaction_guid`, which now comes from the plan template. Whether the gateway accepts those GUIDs has not been tried yet. Without a template, the concept GUID is used as a fallback.
 - **The chat in the CDR:** the PDHC CDR manual does not list `Communication` or message Bundles, so whether the CDR accepts the chat has to be tried.

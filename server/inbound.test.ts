@@ -9,6 +9,7 @@ const { buildDemoBundle, createDemo } = await import('./demo.ts');
 const { storeDelivery, getPatientView, getAppView } = await import('./store.ts');
 const { reportStop } = await import('./report.ts');
 const { normalizeBaseUrl } = await import('./pdhc.ts');
+const { applyPlanTemplates, planDefinitionUrl } = await import('./plandefinition.ts');
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -110,6 +111,171 @@ test('uses the actions of a PlanDefinition when no CarePlan is contained', () =>
   });
   assert.equal(parsed.carePlans[0].activities[0].title, 'Weekly home spirometry');
   assert.equal(describeTiming(parsed.carePlans[0].activities[0].timing), 'Once a week');
+});
+
+// The shape request.pdhc delivered on 2026-11-19 (GET /provider/download/{sr}),
+// with the patient and ids replaced: the CarePlan's activities only list
+// concepts, and the plan template is on plan.pdhc.
+const TEMPLATE_URL = 'https://plan.pdhc.se/api/v1/plandefinitions/pd-1';
+const concept = (code: string, display: string) => ({
+  concept: { coding: [{ system: 'urn:pdhc:concept', code, display }], text: display },
+});
+function pdhcDelivery() {
+  return {
+    resourceType: 'ServiceRequest',
+    id: 'sr-real',
+    status: 'active',
+    intent: 'order',
+    subject: { reference: '#patient-p-real', display: 'Test Testsson' },
+    authoredOn: '2026-11-19T13:38:06Z',
+    instantiatesCanonical: [TEMPLATE_URL],
+    contained: [
+      { resourceType: 'Patient', id: 'patient-p-real', name: [{ text: 'Test Testsson' }] },
+      { resourceType: 'Goal', id: 'goal-0', description: { text: 'cgm_mean_glucose' } },
+      {
+        resourceType: 'CarePlan',
+        id: 'careplan-sr-real',
+        title: 'MMD_plan',
+        status: 'active',
+        instantiatesCanonical: [TEMPLATE_URL],
+        goal: [{ reference: '#goal-0' }],
+        activity: [
+          { performedActivity: [concept('c-cgm', 'CGM')] },
+          { performedActivity: [concept('c-sleep', 'sleep-duration')] },
+          {
+            performedActivity: [
+              concept('c-sys', 'systolic-blood-pressure'),
+              concept('c-dia', 'diastolic-blood-pressure'),
+              concept('c-stress', 'stress'),
+            ],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+// The template's activities as plan.pdhc serves them, shortened, and in
+// another order than the delivery to show that they are matched by concept.
+const transaction = (guid: string, conceptGuid: string, name: string, unit: string | null, min: number | null, max: number | null) => ({
+  guid,
+  transaction_guid: guid,
+  concept_guid: conceptGuid,
+  concept_name: name,
+  concept_unit_name: unit,
+  range_min: min,
+  range_max: max,
+  requirement_type: 'required',
+  expected_value: null,
+});
+const noTiming = { timing_type: null, timing_frequency: null, timing_period: null, timing_period_unit: null, timing_bounds_mode: null, timing_bounds_count: null, timing_bounds_duration_value: null, timing_bounds_duration_unit: null };
+const TEMPLATE = {
+  guid: 'pd-1',
+  title: 'MMD_plan',
+  activities: [
+    {
+      ...noTiming,
+      sort_order: 2,
+      title: 'Veckorapport',
+      performer_type: 'Practitioner',
+      timing_period: 1,
+      timing_period_unit: 'wk',
+      transactions: [
+        transaction('tx-sys', 'c-sys', 'systolic-blood-pressure', 'mmHg', 100, 130),
+        transaction('tx-dia', 'c-dia', 'diastolic-blood-pressure', 'mmHg', 60, 80),
+        transaction('tx-stress', 'c-stress', 'stress', null, null, null),
+      ],
+    },
+    { ...noTiming, sort_order: 0, title: 'CGM', performer_type: 'Patient', timing_type: 'once', transactions: [transaction('tx-cgm', 'c-cgm', 'CGM', 'mmol/L', 4, 8)] },
+    {
+      ...noTiming,
+      sort_order: 1,
+      title: 'Sleep',
+      description: 'rapportera sömntid',
+      performer_type: 'Patient',
+      timing_type: 'repeat',
+      timing_frequency: 1,
+      timing_period: 1,
+      timing_period_unit: 'd',
+      transactions: [transaction('tx-sleep', 'c-sleep', 'sleep-duration', 'h', 0, 12)],
+    },
+  ],
+};
+
+test('reads the concepts in a CarePlan as request.pdhc delivers it', () => {
+  const parsed = parseDelivery(pdhcDelivery(), { patientGuid: 'p-real' });
+  const [plan] = parsed.carePlans;
+  assert.deepEqual(plan.instantiates, [TEMPLATE_URL]);
+  assert.deepEqual(
+    plan.activities.map((a) => [a.key, a.title, a.timing.kind]),
+    [
+      ['1-cgm', 'CGM', 'unscheduled'],
+      ['2-sleep-duration', 'sleep-duration', 'unscheduled'],
+      ['3-systolic-blood-pressure-diastolic-blood', 'systolic-blood-pressure, diastolic-blood-pressure, stress', 'unscheduled'],
+    ],
+  );
+  assert.deepEqual(plan.activities[1].transactions, [{ conceptGuid: 'c-sleep', name: 'sleep-duration' }]);
+});
+
+test('fills in title, schedule and transactions from the plan template on plan.pdhc', async () => {
+  const parsed = parseDelivery(pdhcDelivery(), { patientGuid: 'p-real' });
+  const keysBefore = parsed.carePlans[0].activities.map((a) => a.key);
+  const loaded: string[] = [];
+  const problems = await applyPlanTemplates(parsed, async (url) => {
+    loaded.push(url);
+    return TEMPLATE;
+  });
+  assert.deepEqual(problems, []);
+  assert.deepEqual(loaded, [TEMPLATE_URL]);
+
+  const [cgm, sleep, weekly] = parsed.carePlans[0].activities;
+  // The keys must not change, since stops done are stored per key.
+  assert.deepEqual([cgm.key, sleep.key, weekly.key], keysBefore);
+  assert.deepEqual(
+    [cgm, sleep, weekly].map((a) => [a.title, describeTiming(a.timing), a.performerType]),
+    [
+      ['CGM', 'Once', 'Patient'],
+      ['Sleep', 'Once a day', 'Patient'],
+      ['Veckorapport', 'Once a week', 'Practitioner'],
+    ],
+  );
+  assert.equal(sleep.description, 'rapportera sömntid');
+  assert.equal(cgm.derivedTitle, undefined);
+  assert.deepEqual(cgm.transactions, [
+    { transactionGuid: 'tx-cgm', conceptGuid: 'c-cgm', name: 'CGM', requirement: 'required', rangeMin: 4, rangeMax: 8, expected: undefined, unit: 'mmol/L' },
+  ]);
+  assert.deepEqual(
+    weekly.transactions.map((t) => [t.transactionGuid, t.unit, t.rangeMin, t.rangeMax]),
+    [
+      ['tx-sys', 'mmHg', 100, 130],
+      ['tx-dia', 'mmHg', 60, 80],
+      ['tx-stress', undefined, undefined, undefined],
+    ],
+  );
+});
+
+test('keeps the delivery as it is when the plan template cannot be read', async () => {
+  const parsed = parseDelivery(pdhcDelivery(), { patientGuid: 'p-real' });
+  const problems = await applyPlanTemplates(parsed, async () => {
+    throw new Error('plan.pdhc answered 503.');
+  });
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /MMD_plan.*503/);
+  assert.equal(parsed.carePlans[0].activities[0].title, 'CGM');
+  assert.equal(parsed.carePlans[0].activities[0].timing.kind, 'unscheduled');
+});
+
+test('only fetches plan templates from plan.pdhc', () => {
+  assert.equal(planDefinitionUrl(`${TEMPLATE_URL}|1.0.0`), TEMPLATE_URL);
+  assert.equal(planDefinitionUrl('http://plan.pdhc.se/api/v1/plandefinitions/pd-1'), undefined);
+  assert.equal(planDefinitionUrl('https://plan.pdhc.se:8443/api/v1/plandefinitions/pd-1'), undefined);
+  assert.equal(planDefinitionUrl('https://plan.pdhc.se.example.com/x'), undefined);
+  assert.equal(planDefinitionUrl('https://169.254.169.254/latest'), undefined);
+  assert.equal(planDefinitionUrl('not a url'), undefined);
+});
+
+test('a template activity with no timing is not read as daily', () => {
+  assert.equal(timingFromPdhcFields(noTiming), undefined);
 });
 
 test('rejects what is not a ServiceRequest', () => {
