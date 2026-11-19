@@ -206,6 +206,10 @@ export interface OverviewMeasure {
   available: boolean;
   /** The demo range in display units, e.g. "6–9 h"; null for a measure without data source. */
   range: string | null;
+  /** The series in the app that show this measure (blood pressure: systolic and diastolic), empty without data source. */
+  series: HalsaSeries[];
+  /** The demo range per series in display units (sleep in hours), for the graph's band. */
+  bands: { series: HalsaSeries; low: number; high: number }[];
   latest: { value: string; unit: string | null; time: string; device: string | null; status: 'final' | 'preliminary' } | null;
 }
 
@@ -260,6 +264,23 @@ export function displayValue(observation: HalsaObservation): { value: string; un
   if (observation.value === undefined) return undefined;
   if (isHalsaRating(observation.type)) return { value: number(observation.value), unit: 'of 7' };
   return { value: number(observation.value), unit: observation.unit ?? null };
+}
+
+/** The app's series for an overview measure: its own type, or systolic and diastolic for blood pressure. */
+export function measureSeries(type: string | null): HalsaSeries[] {
+  if (!type) return [];
+  if (type === 'blood-pressure') return ['systolic', 'diastolic'];
+  if (type === 'bmi') return ['weight'];
+  return type in HALSA_SERIES ? [type as HalsaSeries] : [];
+}
+
+/** The demo ranges of a measure per series, in display units (sleep minutes → hours). */
+export function displayBands(type: string | null, ranges: { component?: string; low: number; high: number }[]) {
+  return ranges.flatMap((r) => {
+    if (r.component === 'sleep-duration') return [{ series: 'sleep' as HalsaSeries, low: minutesToHours(r.low), high: minutesToHours(r.high) }];
+    const series = (r.component ?? type) as HalsaSeries | null;
+    return series && series in HALSA_SERIES ? [{ series, low: r.low, high: r.high }] : [];
+  });
 }
 
 /** A demo range in display units: sleep in hours, blood pressure as systolic / diastolic. */

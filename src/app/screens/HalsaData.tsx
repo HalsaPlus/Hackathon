@@ -1,15 +1,17 @@
-import type { ReactNode } from 'react';
-import { HALSA_SERIES, type HalsaPoint, type HalsaSeries, halsaDevice, halsaSeriesFor } from '../../../shared/halsa.ts';
+import { type ReactNode, useState } from 'react';
+import { HALSA_SERIES, type HalsaPoint, type HalsaSeries, halsaDevice, halsaSeriesFor, type OverviewCategory } from '../../../shared/halsa.ts';
 import type { ScreenProps } from '../App.tsx';
 import { useHalsaOverview, useHalsaSeries, useHalsaVaccinations } from '../halsa.ts';
 import { formatClock, formatShort, lanes } from '../model.ts';
-import { HalsaHome, Vaccinations } from './HalsaHome.tsx';
+import { CategoryView, HalsaHome, Vaccinations } from './HalsaHome.tsx';
 import { Sparkline } from './Health.tsx';
 
-// "My data" for a patient linked to Hälsa+: the Hälsa+ home (Health score and
-// body figure), the last 14 days of each series in the same cards as the
-// values reported in MMD, and her vaccinations. Patients without a link get
-// `fallback` (MMD's own list), unchanged.
+// "My data" for a patient linked to Hälsa+. The main view: the Hälsa+ home
+// (Health score and body figure), then the last 14 days of every series in
+// the same cards as the values reported in MMD, then her vaccinations. A tap
+// on a bubble shows that category alone (CategoryView), without the feed;
+// back returns to the figure. Patients without a link get `fallback` (MMD's
+// own list), unchanged.
 
 const when = (time: string) => `${formatShort(time)} ${formatClock(time)}`;
 
@@ -17,6 +19,11 @@ export function HalsaData({ view, patientGuid, fallback }: Pick<ScreenProps, 'vi
   const state = useHalsaSeries(patientGuid);
   const overview = useHalsaOverview(patientGuid);
   const vaccinations = useHalsaVaccinations(patientGuid);
+  const [open, setOpen] = useState<OverviewCategory['id'] | null>(null);
+  const show = (id: OverviewCategory['id'] | null) => {
+    setOpen(id);
+    window.scrollTo(0, 0);
+  };
 
   if (state.status === 'idle' || state.status === 'unlinked') return fallback;
   if (state.status === 'loading') {
@@ -37,6 +44,9 @@ export function HalsaData({ view, patientGuid, fallback }: Pick<ScreenProps, 'vi
     );
   }
 
+  const category = open && overview.status === 'ready' ? overview.data.categories.find((c) => c.id === open) : undefined;
+  if (category) return <CategoryView category={category} points={state.data.points} onBack={() => show(null)} />;
+
   // The plan's range and line colour for each series it asks for.
   const ranges = new Map<HalsaSeries, { low?: number; high?: number; color: string }>();
   for (const lane of lanes(view)) {
@@ -52,7 +62,7 @@ export function HalsaData({ view, patientGuid, fallback }: Pick<ScreenProps, 'vi
   if (shown.length === 0) {
     return (
       <>
-        <HalsaHome overview={overview} />
+        <HalsaHome overview={overview} onOpen={show} />
         <section className="card">
           <h2>Nothing from Hälsa+ yet</h2>
           <p className="muted">Hälsa+ has no values from the last 14 days.</p>
@@ -64,7 +74,7 @@ export function HalsaData({ view, patientGuid, fallback }: Pick<ScreenProps, 'vi
 
   return (
     <>
-    <HalsaHome overview={overview} />
+    <HalsaHome overview={overview} onOpen={show} />
     <h2 className="k" style={{ margin: '8px 0 0' }}>
       Last 14 days
     </h2>

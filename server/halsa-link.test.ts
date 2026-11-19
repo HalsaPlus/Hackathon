@@ -427,3 +427,45 @@ test('consent: when Hälsa+ cannot answer, nothing is sent', async () => {
     removeHalsaLink(ANDREA_GUID);
   }
 });
+
+test('Measure shows readable labels for PDHC concept names; what is sent keeps the concept name', async () => {
+  const { conceptLabel } = await import('../src/app/halsa.ts');
+  const parsed = await andreasPlan();
+  const transactions = parsed.carePlans[0].activities.flatMap((a) => a.transactions);
+  assert.deepEqual(
+    transactions.map((t) => [t.name, conceptLabel(t)]),
+    [
+      ['CGM', 'Glucose (CGM)'],
+      ['sleep-duration', 'Sleep duration'],
+      ['systolic-blood-pressure', 'Systolic blood pressure'],
+      ['diastolic-blood-pressure', 'Diastolic blood pressure'],
+      ['anxiety', 'Anxiety'],
+      ['stress', 'Stress'],
+    ],
+  );
+  assert.equal(conceptLabel({ name: 'asthma-peak-flow' }), 'Asthma peak flow');
+  // Names that are already text stay as they are (Casper's demo plans).
+  assert.equal(conceptLabel({ name: 'Morning stiffness (0–10)' }), 'Morning stiffness (0–10)');
+  assert.equal(conceptLabel({ name: 'FEV1' }), 'FEV1');
+});
+
+test('overview: each measure names its series and its demo band in display units, for the category graphs', async () => {
+  saveHalsaLink(ANDREA_GUID, ANDREA_TOKEN, 'test');
+  try {
+    const { body } = await getJson(`/api/app/${ANDREA_GUID}/halsa/overview?asOf=${AS_OF}`);
+    const measure = (category: string, id: string) =>
+      body.categories.find((c: { id: string }) => c.id === category).measures.find((m: { id: string }) => m.id === id);
+    assert.deepEqual(measure('mental-health', 'sleep').series, ['sleep']);
+    assert.deepEqual(measure('mental-health', 'sleep').bands, [{ series: 'sleep', low: 6, high: 9 }]);
+    assert.deepEqual(measure('mental-health', 'energy').bands, [{ series: 'energy', low: 4, high: 7 }]);
+    assert.deepEqual(measure('heart', 'blood-pressure').series, ['systolic', 'diastolic']);
+    assert.deepEqual(measure('heart', 'blood-pressure').bands, [
+      { series: 'systolic', low: 90, high: 130 },
+      { series: 'diastolic', low: 60, high: 85 },
+    ]);
+    assert.deepEqual(measure('hormones', 'glucose').bands, [{ series: 'glucose', low: 3.9, high: 10 }]);
+    assert.deepEqual([measure('lungs', 'peak-flow').series, measure('lungs', 'peak-flow').bands], [[], []]);
+  } finally {
+    removeHalsaLink(ANDREA_GUID);
+  }
+});

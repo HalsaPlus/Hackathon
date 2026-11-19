@@ -1,6 +1,7 @@
 import express from 'express';
 import type { Express, NextFunction, Request, Response } from 'express';
 import {
+  displayBands,
   displayRange,
   displayValue,
   HALSA_RATINGS,
@@ -13,6 +14,7 @@ import {
   type HalsaType,
   type HalsaVaccination,
   isHalsaRating,
+  measureSeries,
   type OverviewCategory,
   pointsFromObservation,
 } from '../shared/halsa.ts';
@@ -191,6 +193,7 @@ interface OverviewBody {
     measures: {
       id: string;
       name: string;
+      type: string | null;
       available: boolean;
       demoRanges: { component?: string; low: number; high: number; unit: string }[];
       latest: (HalsaObservation & { status?: string }) | null;
@@ -220,6 +223,8 @@ export async function readHalsaOverview(token: string, input: { asOf?: unknown }
           name: m.name,
           available: m.available,
           range: displayRange(m.demoRanges),
+          series: measureSeries(m.type),
+          bands: displayBands(m.type, m.demoRanges),
           latest:
             latest && shown
               ? {

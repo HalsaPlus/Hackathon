@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import type { HalsaOverview, HalsaVaccination, OverviewCategory } from '../../../shared/halsa.ts';
+import { HALSA_SERIES, type HalsaOverview, type HalsaPoint, type HalsaVaccination, type OverviewCategory, type OverviewMeasure } from '../../../shared/halsa.ts';
 import figure from '../assets/halsa-figure.png';
 import type { HalsaLoad } from '../halsa.ts';
 import { formatClock, formatShort } from '../model.ts';
+import { Sparkline } from './Health.tsx';
 
-// The Hälsa+ home for a linked patient: the Health score, the dotted body
-// with six category bubbles, and a detail list per category. The scores are
-// computed by Hälsa+ against DEMO ranges (see halsa-plus/README.md).
+// The Hälsa+ home for a linked patient: the Health score and the dotted body
+// with six category bubbles. A tap on a bubble opens that category alone:
+// one card per type with its last 14 days as a graph, or its latest value.
+// The scores are computed by Hälsa+ against DEMO ranges (see halsa-plus/README.md).
 
 // Everything is placed in one 360 × 480 coordinate system: the SVG (figure,
 // connector lines, dots) uses it as its viewBox, and the bubbles are
@@ -97,55 +99,7 @@ function Body({ overview, onOpen }: { overview: HalsaOverview; onOpen: (id: Over
   );
 }
 
-function Detail({ category, onBack }: { category: OverviewCategory; onBack: () => void }) {
-  return (
-    <section aria-labelledby="category-title" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <button type="button" className="back" onClick={onBack} style={{ background: 'none', border: 0, padding: 0, textAlign: 'left', cursor: 'pointer' }}>
-        ← All categories
-      </button>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <h2 id="category-title" style={{ fontSize: 22 }}>
-          {category.name}
-        </h2>
-        <span className={category.score === null ? 'chip plain' : 'chip'}>{category.score === null ? 'No score' : `${category.score}%`}</span>
-      </div>
-      <p className="muted" style={{ margin: 0 }}>
-        Available data: {category.available}/{category.total}
-      </p>
-      <ul className="list" style={{ gap: 8 }}>
-        {category.measures.map((m) => (
-          <li key={m.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-              <strong>{m.name}</strong>
-              {m.range && <span className="muted small">Demo range {m.range}</span>}
-            </div>
-            {m.latest ? (
-              <>
-                <span style={{ fontSize: 22, fontWeight: 700 }}>
-                  {m.latest.value}
-                  <span className="muted" style={{ fontSize: 14, fontWeight: 600 }}>
-                    {' '}
-                    {m.latest.unit ?? ''}
-                  </span>
-                </span>
-                <span className="muted small">
-                  {when(m.latest.time)}
-                  {m.latest.device ? ` · ${m.latest.device}` : ''}
-                  {m.latest.status === 'preliminary' ? ' · preliminary' : ''}
-                </span>
-              </>
-            ) : (
-              <span className="muted">No data available</span>
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-export function HalsaHome({ overview }: { overview: HalsaLoad<HalsaOverview> }) {
-  const [open, setOpen] = useState<OverviewCategory['id'] | null>(null);
+export function HalsaHome({ overview, onOpen }: { overview: HalsaLoad<HalsaOverview>; onOpen: (id: OverviewCategory['id']) => void }) {
   if (overview.status === 'loading' || overview.status === 'idle' || overview.status === 'unlinked') return null;
   if (overview.status === 'error') {
     return (
@@ -156,9 +110,6 @@ export function HalsaHome({ overview }: { overview: HalsaLoad<HalsaOverview> }) 
       </section>
     );
   }
-  const category = overview.data.categories.find((c) => c.id === open);
-  if (category) return <Detail category={category} onBack={() => setOpen(null)} />;
-
   return (
     <section aria-labelledby="health-score" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ textAlign: 'center' }}>
@@ -172,7 +123,108 @@ export function HalsaHome({ overview }: { overview: HalsaLoad<HalsaOverview> }) 
           From Hälsa+ · last 14 days · demo ranges
         </p>
       </div>
-      <Body overview={overview.data} onOpen={setOpen} />
+      <Body overview={overview.data} onOpen={onOpen} />
+    </section>
+  );
+}
+
+type View = 'graph' | 'latest';
+
+/** One type in a category: its 14 days as a graph (default) or its latest value, with a small toggle. */
+function MeasureCard({ measure, points }: { measure: OverviewMeasure; points: HalsaPoint[] }) {
+  const [view, setView] = useState<View>('graph');
+  const lines = measure.series
+    .map((series) => ({ series, values: points.filter((p) => p.series === series) }))
+    .filter((line) => line.values.length > 0);
+  // A graph needs at least two values; with fewer the card shows the latest value.
+  const hasGraph = lines.some((line) => line.values.length >= 2);
+  const count = lines[0]?.values.length ?? 0;
+  const hasLatest = !!measure.latest;
+  const shown: View | null = hasGraph && hasLatest ? view : hasGraph ? 'graph' : hasLatest ? 'latest' : null;
+  const titleId = `measure-${measure.id}`;
+
+  return (
+    <li className="card" aria-labelledby={titleId} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <h3 id={titleId} style={{ margin: 0, fontSize: 17, color: 'var(--cyan)' }}>
+          {measure.name}
+        </h3>
+        {hasGraph && hasLatest && (
+          <div className="segmented" role="group" aria-label={`${measure.name}: show`} style={{ fontSize: 12 }}>
+            <button type="button" aria-pressed={view === 'latest'} onClick={() => setView('latest')} style={{ minHeight: 28, padding: '0 10px', whiteSpace: 'nowrap' }}>
+              Latest
+            </button>
+            <button type="button" aria-pressed={view === 'graph'} onClick={() => setView('graph')} style={{ minHeight: 28, padding: '0 10px', whiteSpace: 'nowrap' }}>
+              14 days
+            </button>
+          </div>
+        )}
+      </div>
+
+      {shown === null && <span className="muted">No data available</span>}
+
+      {shown === 'latest' && measure.latest && (
+        <>
+          <span style={{ fontSize: 26, fontWeight: 700 }}>
+            {measure.latest.value}
+            <span className="muted" style={{ fontSize: 14, fontWeight: 600 }}>
+              {' '}
+              {measure.latest.unit ?? ''}
+            </span>
+          </span>
+          <span className="muted small">
+            {when(measure.latest.time)} · From Hälsa+{measure.latest.device ? ` · ${measure.latest.device}` : ''}
+            {measure.latest.status === 'preliminary' ? ' · preliminary' : ''}
+          </span>
+          {!hasGraph && (
+            <span className="muted small">
+              {count === 0 ? 'No values in the last 14 days' : `Only ${count} value in the last 14 days, too few for a graph`}
+            </span>
+          )}
+        </>
+      )}
+
+      {shown === 'graph' &&
+        lines.map(({ series, values }) => {
+          const band = measure.bands.find((b) => b.series === series);
+          return (
+            <div key={series} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {lines.length > 1 && <span className="muted small">{HALSA_SERIES[series].label}</span>}
+              <Sparkline values={values.map((p) => p.value)} low={band?.low} high={band?.high} color="#03D4D1" />
+            </div>
+          );
+        })}
+      {shown === 'graph' && (
+        <span className="muted small">
+          {count} values · last 14 days
+          {measure.range ? ` · demo range ${measure.range}` : ''}
+        </span>
+      )}
+    </li>
+  );
+}
+
+/** One category alone: its types only, one card each. Back returns to the figure. */
+export function CategoryView({ category, points, onBack }: { category: OverviewCategory; points: HalsaPoint[]; onBack: () => void }) {
+  return (
+    <section aria-labelledby="category-title" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <button type="button" className="back" onClick={onBack} style={{ background: 'none', border: 0, padding: 0, textAlign: 'left', cursor: 'pointer' }}>
+        ← Back to the body
+      </button>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <h2 id="category-title" style={{ fontSize: 22 }}>
+          {category.name}
+        </h2>
+        <span className={category.score === null ? 'chip plain' : 'chip'}>{category.score === null ? 'No score' : `${category.score}%`}</span>
+      </div>
+      <p className="muted" style={{ margin: 0 }}>
+        Available data: {category.available}/{category.total}
+      </p>
+      <ul className="list" style={{ gap: 10 }}>
+        {category.measures.map((m) => (
+          <MeasureCard key={m.id} measure={m} points={points} />
+        ))}
+      </ul>
     </section>
   );
 }
