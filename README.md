@@ -43,6 +43,8 @@ Open http://localhost:3001/app/ and sign in with `admin` and the password. Choos
 
 ## Connecting to PDHC
 
+To do the same from another app, give [docs/pdhc-instruktion-for-claude.md](docs/pdhc-instruktion-for-claude.md) (in Swedish) to Claude. It is the whole method as verified against PDHC: feed, download, the frozen care plan, terms, closed requests, and sending and reading measurements. It holds no token.
+
 Under **Connection** in the admin console you enter these:
 
 | Field | What it is |
