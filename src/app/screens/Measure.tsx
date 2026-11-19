@@ -3,7 +3,7 @@ import { halsaDevice } from '../../../shared/halsa.ts';
 import type { ObservationView, ReportResult, Transaction } from '../../../shared/types.ts';
 import { call } from '../../api.ts';
 import type { ScreenProps } from '../App.tsx';
-import { halsaReading, prefilledValue, useStopHalsa, writeRatingToHalsa } from '../halsa.ts';
+import { halsaReading, maySend, prefilledValue, useHalsaConsent, useStopHalsa, writeRatingToHalsa } from '../halsa.ts';
 import { isRating, simulate, simulationFor, SIMULATED_DEVICE } from '../healthkit.ts';
 import { CheckIcon, HeartIcon } from '../icons.tsx';
 import { DAY, formatClock, formatLong, observationsFor, planColor, planDay, stopState } from '../model.ts';
@@ -85,6 +85,7 @@ export function MeasureScreen({ view, today, refresh, patientGuid, requestGuid, 
   const [error, setError] = useState<string | null>(null);
   const [halsaNote, setHalsaNote] = useState<string | null>(null);
   const halsa = useStopHalsa(patientGuid, transactions, stop?.dueAt);
+  const consent = useHalsaConsent(patientGuid, request?.guid);
 
   const simulated = useMemo(() => {
     const out: Record<string, string> = {};
@@ -237,32 +238,34 @@ export function MeasureScreen({ view, today, refresh, patientGuid, requestGuid, 
               );
             }
             if (rating) {
+              // A Hälsa+ rating is 1–7 with its own anchors; any other rating stays 0–10.
+              const scale = reading?.rating;
               return (
                 <section key={t.name} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10, borderColor: `${color}88` }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12 }}>
                     <label htmlFor={id} style={{ fontWeight: 700 }}>
-                      {t.name.replace(/\s*\(0\s*[–-]\s*10\)/, '')}
+                      {scale ? reading.label : t.name.replace(/\s*\(0\s*[–-]\s*10\)/, '')}
                     </label>
                     <span style={{ fontSize: 30, fontWeight: 700, whiteSpace: 'nowrap' }}>
                       {valueOf(t) || '–'}
                       <span className="muted" style={{ fontSize: 14 }}>
                         {' '}
-                        /10
+                        /{scale ? scale.max : 10}
                       </span>
                     </span>
                   </div>
                   <input
                     id={id}
                     type="range"
-                    min={0}
-                    max={10}
+                    min={scale ? scale.min : 0}
+                    max={scale ? scale.max : 10}
                     step={1}
                     value={valueOf(t)}
                     onChange={(e) => setValues({ ...values, [t.name]: e.target.value })}
                   />
                   <div className="muted small" style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>None at all</span>
-                    <span>Worst imaginable</span>
+                    <span>{scale ? `1 · ${scale.low}` : 'None at all'}</span>
+                    <span>{scale ? `${scale.high} · 7` : 'Worst imaginable'}</span>
                   </div>
                 </section>
               );
@@ -295,7 +298,19 @@ export function MeasureScreen({ view, today, refresh, patientGuid, requestGuid, 
             </p>
           )}
           <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button type="button" className="btn big" onClick={() => void send()} disabled={sending || missing}>
+            {!maySend(consent) && (
+              <p className="muted small" role="status" style={{ margin: 0, textAlign: 'center' }}>
+                {consent.status === 'error'
+                  ? `Your consent could not be checked, so nothing can be sent: ${consent.message} `
+                  : consent.status === 'ready' && consent.data.decision === 'decline'
+                    ? 'You chose not to share your values for this plan, so nothing can be sent. '
+                    : 'Before anything is sent, you decide whether to share your values for this plan. '}
+                <a href={`#/new-plan/${encodeURIComponent(request.guid)}`} style={{ fontWeight: 700 }}>
+                  {consent.status === 'ready' && consent.data.decision === 'decline' ? 'Change your decision →' : 'Decide now →'}
+                </a>
+              </p>
+            )}
+            <button type="button" className="btn big" onClick={() => void send()} disabled={sending || missing || !maySend(consent)}>
               {sending ? 'Sending …' : transactions.length ? 'Send to the care team' : 'Mark as done'}
             </button>
             <p className="muted small" style={{ margin: 0, textAlign: 'center' }}>

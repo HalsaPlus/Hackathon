@@ -3,6 +3,7 @@ import { call } from '../../api.ts';
 import type { ScreenProps } from '../App.tsx';
 import { ShieldIcon } from '../icons.tsx';
 import { formatShort, isMilestone, lanes, planColor, planWeeks } from '../model.ts';
+import { HalsaConsentCard } from './HalsaConsent.tsx';
 
 // Step 5: the plan the care team sent, before the patient opens the map.
 
@@ -52,6 +53,8 @@ export function NewPlanScreen({ view, patientGuid, refresh, requestGuid }: Scree
           </p>
         )}
       </div>
+
+      <HalsaConsentCard patientGuid={patientGuid} request={request} />
 
       <section className="card" aria-labelledby="goals" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <h2 id="goals" className="k">
