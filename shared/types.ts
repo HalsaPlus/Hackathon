@@ -161,6 +161,23 @@ export interface MessageView {
   createdAt: string;
   /** Whether the FHIR message reached the CDR. */
   cdrStatus: 'not-configured' | 'stored' | 'failed' | null;
+  /** The AI assistant the patient wrote through ("ChatGPT"); null when written in the app. */
+  via: string | null;
+}
+
+/** A secret link that lets an AI assistant reach one patient's data over MCP. */
+export interface AssistantLinkView {
+  id: number;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+/** Only when a link is made: the full address, shown once. */
+export interface NewAssistantLink extends AssistantLinkView {
+  url: string;
+  secret: string;
 }
 
 export interface AppView {

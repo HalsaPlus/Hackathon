@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { PatientView, ServiceRequestView, Stop } from '../../shared/types.ts';
 import { api } from '../api.ts';
+import { AssistantLinksCard } from '../components/AssistantLinksCard.tsx';
+import { PatientChatCard } from '../components/PatientChatCard.tsx';
 import { lineColor, MetroMap } from '../components/MetroMap.tsx';
 import { StopPanel } from '../components/StopPanel.tsx';
 import { DAY, formatDateTime, formatLong, formatRange, formatShort, sourceLabel, startOfDay } from '../format.ts';
@@ -284,6 +286,8 @@ export function PatientPage({ guid }: { guid: string }) {
       {view.requests.map((request) => (
         <RequestCard key={request.guid} request={request} patientGuid={patient.guid} onChanged={load} />
       ))}
+      <PatientChatCard patientGuid={patient.guid} />
+      <AssistantLinksCard patientGuid={patient.guid} />
       <p className="muted small">Updated {formatLong(Date.now())}.</p>
     </>
   );

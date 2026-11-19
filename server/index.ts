@@ -6,6 +6,7 @@ import express from 'express';
 import { halsaPlusFromEnv } from '../halsa-plus/src/mount.ts';
 import { loginConfigured, setupAuth } from './auth.ts';
 import { setupHalsaLink } from './halsa-link.ts';
+import { setupMcp } from './mcp.ts';
 import { setupApi, setupPushEndpoint } from './routes.ts';
 import { startPolling } from './sync.ts';
 
@@ -37,6 +38,10 @@ app.get('/api/health', (_req, res) => {
 // PDHC pushes ServiceRequests here. It authenticates with X-Push-Secret,
 // not with a login session, so it is registered before setupAuth().
 setupPushEndpoint(app);
+
+// MMD as an MCP server for AI assistants (ChatGPT, Claude …). A secret link
+// per patient is the credential, not the admin login, so it comes before setupAuth().
+setupMcp(app);
 
 // The simulated Hälsa+ API (halsa-plus/). Every call carries a patient's
 // bearer token instead of the admin login, so it is mounted before setupAuth().

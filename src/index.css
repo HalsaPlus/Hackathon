@@ -1094,3 +1094,38 @@ code,
     grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   }
 }
+
+/* The care team's view of the patient's chat (admin console). */
+.chat-log {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+.chat-entry {
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.chat-entry.from-care-team {
+  margin-left: 2rem;
+}
+
+.chat-entry.from-patient {
+  margin-right: 2rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Express, Request, Response } from 'express';
+import { AssistantLinkError, createAssistantLink, listAssistantLinks, revokeAssistantLink } from './assistant.ts';
 import { safeEqual } from './auth.ts';
 import { now, run } from './db.ts';
 import { createDemo } from './demo.ts';
@@ -21,6 +22,7 @@ import {
   listCommunications,
   listConnections,
   listInboundLog,
+  listMessages,
   listPatients,
   logInbound,
   markSeen,
@@ -245,6 +247,47 @@ export function setupApi(app: Express) {
     } catch (error) {
       sendError(res, error);
     }
+  });
+
+  // The care team's side of the chat, and AI assistant links (issue #7) ------------
+
+  app.get('/api/patients/:guid/messages', (req, res) => {
+    if (!getPatientView(req.params.guid)) return res.status(404).json({ error: 'The patient was not found.' });
+    res.json(listMessages(req.params.guid));
+  });
+
+  app.post('/api/patients/:guid/messages', (req, res) => {
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!text || text.length > 2000) return res.status(400).json({ error: 'Write a message (at most 2000 characters).' });
+    if (!getPatientView(req.params.guid)) return res.status(404).json({ error: 'The patient was not found.' });
+    const message = addMessage(req.params.guid, 'care-team', text);
+    res.status(201).json(message);
+    void sendToCdr({ ...message, patientGuid: req.params.guid }).then((outcome) => setMessageCdrOutcome(message.id, outcome));
+  });
+
+  app.get('/api/patients/:guid/assistant-links', (req, res) => {
+    if (!getPatientView(req.params.guid)) return res.status(404).json({ error: 'The patient was not found.' });
+    res.json(listAssistantLinks(req.params.guid));
+  });
+
+  app.post('/api/patients/:guid/assistant-links', (req, res) => {
+    if (!getPatientView(req.params.guid)) return res.status(404).json({ error: 'The patient was not found.' });
+    // The address the assistant must reach: this app's public address when set
+    // (a tunnel or a deployment), otherwise the one the browser used.
+    const base = getSettings().publicUrl ?? `${req.protocol}://${req.get('host')}`;
+    try {
+      const label = typeof req.body?.label === 'string' ? req.body.label : '';
+      res.status(201).json(createAssistantLink(req.params.guid, label, base));
+    } catch (error) {
+      if (error instanceof AssistantLinkError) return res.status(400).json({ error: error.message });
+      sendError(res, error);
+    }
+  });
+
+  app.post('/api/assistant-links/:id/revoke', (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || !revokeAssistantLink(id)) return res.status(404).json({ error: 'No active link with that id.' });
+    res.status(204).end();
   });
 
   app.get('/api/inbound-log', (_req, res) => {

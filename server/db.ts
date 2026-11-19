@@ -239,6 +239,21 @@ db.exec(`
     value      TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+
+  -- Secret links that let an AI assistant (ChatGPT, Claude …) reach one
+  -- patient's data over MCP. Only a hash of the secret is kept; the link is
+  -- shown once when it is made. The label ("ChatGPT") marks messages sent
+  -- through it.
+  CREATE TABLE IF NOT EXISTS assistant_links (
+    id           INTEGER PRIMARY KEY,
+    patient_guid TEXT NOT NULL REFERENCES patients(guid),
+    label        TEXT NOT NULL,
+    secret_hash  TEXT NOT NULL UNIQUE,
+    created_at   TEXT NOT NULL,
+    last_used_at TEXT,
+    revoked_at   TEXT
+  );
+  CREATE INDEX IF NOT EXISTS assistant_links_patient ON assistant_links(patient_guid);
 `);
 
 // Columns added after the tables first shipped in this version.
@@ -252,6 +267,8 @@ for (const [table, column, type] of [
   ['service_requests', 'pdhc_status', 'TEXT'],
   ['service_requests', 'is_open', 'INTEGER'],
   ['service_requests', 'care_plan_guid', 'TEXT'],
+  // Which AI assistant a patient's message came through ("ChatGPT"); null from the app itself.
+  ['messages', 'via', 'TEXT'],
 ] as const) {
   const names = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
   if (!names.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
