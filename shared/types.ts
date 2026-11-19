@@ -218,6 +218,16 @@ export interface ConnectionView {
   updatedAt: string;
 }
 
+/** Health Connect, the CDR and this app's address. Secrets only as a hint. */
+export interface ServiceSettingsView {
+  healthConnectUrl: string | null;
+  healthConnectTokenHint: string | null;
+  cdrUrl: string | null;
+  cdrSourceService: string | null;
+  cdrServiceKeyHint: string | null;
+  publicUrl: string | null;
+}
+
 export interface InboundLogEntry {
   id: number;
   receivedAt: string;

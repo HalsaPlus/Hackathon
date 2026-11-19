@@ -59,12 +59,23 @@ PDHC delivers requests in two ways, and the app handles both:
 
 Reports from the patient app go to `POST /provider/report/{sr}` on gateway.pdhc, with the PAT and the request's `grant_token`. A demo request stays in demo mode, and the app says so.
 
-## Optional settings
+## Other services
+
+Every connection setting is stored in the database and entered under **Connection** in the admin console, in the card **Other services**. None of it is read from environment variables. Tokens and keys can be replaced or removed, but they are never shown again once saved.
+
+| Setting | What it does |
+| --- | --- |
+| **Health Connect:** URL and token | Fetches the IPS with `GET {url}/Patient/{id}/$summary`, with the token as `Authorization: Bearer`. Without a URL the demo IPS is shown, marked synthetic. |
+| **CDR:** URL, source service and service key | Sends each chat message as a FHIR message Bundle to `{url}/Bundle`, with `X-Source-Service` and `X-Service-Key`. Without a URL the messages are kept in MMD. |
+| **This app:** public address | Written as the sender in the FHIR messages MMD sends. |
+
+## Environment variables
+
+Only what the server needs before it can open the database:
 
 | Variable | What it does |
 | --- | --- |
-| `HEALTH_CONNECT_URL`, `HEALTH_CONNECT_TOKEN` | Fetches the IPS with `GET {url}/Patient/{id}/$summary`. Without them the demo IPS is shown, marked synthetic. |
-| `CDR_FHIR_URL`, `CDR_SOURCE_SERVICE`, `CDR_SERVICE_KEY` | Sends each chat message as a FHIR message Bundle to the CDR. Without them the messages are kept in MMD. |
+| `ADMIN_PASSWORD` | The admin login. Required. |
 | `DATABASE_PATH`, `PORT` | Where the SQLite file lives (default `data/mmd.sqlite`) and the port (default 3001). |
 
 The chat is also available as FHIR for the control tower: `GET /api/fhir/Communication?patient={id}`.
@@ -73,10 +84,12 @@ The chat is also available as FHIR for the control tower: `GET /api/fhir/Communi
 
 - **Server:** Express, in `server/`.
   - `fhir.ts` parses the request and its care plans.
+  - `plandefinition.ts` fills in each activity's title, schedule and transactions from the plan template on plan.pdhc.
   - `store.ts` stores everything in SQLite.
   - `report.ts` and `pdhc.ts` report to PDHC.
   - `messaging.ts` turns the chat into FHIR messaging.
   - `ips.ts` reads the IPS.
+  - `settings.ts` stores how to reach Health Connect, the CDR and this app's address.
   - `demo.ts` builds Andrea.
 - **Patient app:** React, in `src/app/`. The screens are in `src/app/screens/`. The style follows Hälsa+ (MyMedicalData).
 - **Admin console:** React, in `src/`.
@@ -84,6 +97,6 @@ The chat is also available as FHIR for the control tower: `GET /api/fhir/Communi
 
 ## Open questions
 
-- **Schedules:** how PDHC writes an activity's schedule inside the delivered CarePlan is not documented. The parser accepts FHIR `Timing` and plan.pdhc's `timing_*` fields.
-- **Matching values:** the gateway matches values by `transaction_guid`. plan.pdhc does not always send one, so the concept GUID is used as a fallback.
+- **Schedules:** answered by the first real delivery. The CarePlan only lists the concepts each activity measures (`performedActivity`). The schedule, titles, ranges and `transaction_guid` come from the plan template in `instantiatesCanonical` on plan.pdhc. If plan.pdhc cannot be reached, the request is stored without a schedule and the inbound log says so.
+- **Matching values:** the gateway matches values by `transaction_guid`, which now comes from the plan template. Whether the gateway accepts those GUIDs has not been tried yet. Without a template, the concept GUID is used as a fallback.
 - **The chat in the CDR:** the PDHC CDR manual does not list `Communication` or message Bundles, so whether the CDR accepts the chat has to be tried.

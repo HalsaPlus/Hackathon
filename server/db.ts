@@ -229,6 +229,16 @@ db.exec(`
     fetched_at   TEXT NOT NULL
   );
   DROP TABLE IF EXISTS clinical_results;
+
+  -- How to reach the other services (Health Connect, the CDR) and this app's
+  -- own public address, set in the admin console. Secrets are never sent to
+  -- the browser. Only what the server needs before it can open this file
+  -- (DATABASE_PATH, PORT, ADMIN_PASSWORD) is in the environment.
+  CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
 `);
 
 // Columns added after the tables first shipped in this version.

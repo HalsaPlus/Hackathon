@@ -1,4 +1,5 @@
 import type { IpsView } from '../shared/types.ts';
+import { getSettings } from './settings.ts';
 
 // The International Patient Summary (IPS): a FHIR document Bundle with a
 // Composition and sections for problems, medications, allergies and results.
@@ -53,13 +54,14 @@ export function parseIps(bundle: unknown, source: string, synthetic: boolean, fe
 
 /**
  * Fetches the IPS from Health Connect with the standard FHIR operation
- * `Patient/{id}/$summary`. Only used when HEALTH_CONNECT_URL is set.
+ * `Patient/{id}/$summary`. Only used when Health Connect is set up in the
+ * admin console.
  */
 export async function fetchIpsFromHealthConnect(patientGuid: string): Promise<unknown> {
-  const base = process.env.HEALTH_CONNECT_URL?.replace(/\/+$/, '');
-  if (!base) throw new Error('Health Connect is not configured (HEALTH_CONNECT_URL).');
+  const { healthConnectUrl: base, healthConnectToken: token } = getSettings();
+  if (!base) throw new Error('Health Connect is not set up. Add it under Connection in the admin console.');
   const headers: Record<string, string> = { Accept: 'application/fhir+json' };
-  if (process.env.HEALTH_CONNECT_TOKEN) headers.Authorization = `Bearer ${process.env.HEALTH_CONNECT_TOKEN}`;
+  if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`${base}/Patient/${encodeURIComponent(patientGuid)}/$summary`, {
     headers,
     signal: AbortSignal.timeout(20_000),

@@ -7,6 +7,7 @@ A patient-engagement web app (React + Vite frontend, Express backend, SQLite via
 - This repository is **public**. Never commit `.env`, tokens, push secrets or the `data/` database.
 - PDHC may only be used with synthetic data. Never put real patient data into PDHC, this app or this repo.
 - Do not copy passwords, keys, internal IP addresses or personal contact details from the PDHC manuals; some manuals contain them.
+- Connection settings (PDHC, Health Connect, the CDR, the app's public address) live in the database and are edited in the admin console, not in environment variables. Only `ADMIN_PASSWORD`, `DATABASE_PATH` and `PORT` stay in the environment, since they are needed before the database can be opened.
 
 ## PDHC reference
 
@@ -15,4 +16,4 @@ A patient-engagement web app (React + Vite frontend, Express backend, SQLite via
 - Report ingest: https://pdhc.se/docs/gateway/technical.md
 - Live care plan templates with activity timing: `GET https://plan.pdhc.se/api/v1/PlanDefinition`
 
-The exact way PDHC writes an activity's schedule inside the delivered CarePlan is undocumented; `server/fhir.ts` accepts FHIR Timing and plan.pdhc's flat `timing_*` fields. Verify against a real delivery when one is available.
+Verified against a real delivery (2026-11-19): the delivered CarePlan's activities only list the concepts to measure (`activity[].performedActivity[].concept`, system `urn:pdhc:concept`). Title, schedule, performer, ranges, units and transaction GUIDs are in the plan template the CarePlan points to with `instantiatesCanonical` (`GET https://plan.pdhc.se/api/v1/plandefinitions/{guid}`, no token). `server/fhir.ts` reads the concepts and `server/plandefinition.ts` fills in the rest from the template. Activity keys come from the delivery alone, so they stay the same whether or not the template could be read.

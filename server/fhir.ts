@@ -19,6 +19,12 @@ import type { Goal, PeriodUnit, Timing, Transaction } from '../shared/types.ts';
 //
 // If the ServiceRequest carries no CarePlan but a PlanDefinition, the plan's
 // actions are used as activities.
+//
+// What request.pdhc actually delivered (first real download, 2026-11-19): each
+// CarePlan.activity is only `performedActivity[].concept.coding` with system
+// `urn:pdhc:concept`, one per concept to measure. No title, schedule, ranges
+// or transaction GUIDs. Those are in the plan template the CarePlan points to
+// with `instantiatesCanonical`; plandefinition.ts fills them in from there.
 
 type Json = Record<string, any>;
 
@@ -115,7 +121,8 @@ export function timingFromFhir(timing: unknown): Timing | undefined {
 /** plan.pdhc's flat timing fields on a PlanDefinition action. */
 export function timingFromPdhcFields(action: Json): Timing | undefined {
   const type = text(action.timing_type)?.toLowerCase();
-  if (!type && action.timing_frequency === undefined && action.timing_period === undefined) return undefined;
+  // plan.pdhc sends every timing field, with null when it is not set.
+  if (!type && action.timing_frequency == null && action.timing_period == null) return undefined;
 
   const unit = periodUnit(action.timing_period_unit) ?? 'd';
   if (type === 'once') {
@@ -162,9 +169,29 @@ export interface ParsedActivity {
   status: string | null;
   timing: Timing;
   transactions: Transaction[];
+  /** The delivery gave no title, so it was made from what the activity measures. */
+  derivedTitle?: true;
 }
 
-function parseTransactions(value: unknown): Transaction[] {
+export const PDHC_CONCEPT_SYSTEM = 'urn:pdhc:concept';
+
+/** The concepts an activity measures, as request.pdhc writes them in `performedActivity`. */
+function pdhcConcepts(raw: Json): Transaction[] {
+  const result: Transaction[] = [];
+  for (const item of list(raw.performedActivity)) {
+    const concept = isObject(item) && isObject(item.concept) ? item.concept : undefined;
+    if (!concept) continue;
+    const coding = list(concept.coding).find(
+      (c): c is Json => isObject(c) && c.system === PDHC_CONCEPT_SYSTEM && !!text(c.code),
+    );
+    const name = text(coding?.display) ?? text(concept.text);
+    if (!name) continue;
+    result.push({ conceptGuid: text(coding?.code), name });
+  }
+  return result;
+}
+
+export function parseTransactions(value: unknown): Transaction[] {
   const result: Transaction[] = [];
   for (const item of list(value)) {
     if (!isObject(item)) continue;
@@ -178,7 +205,7 @@ function parseTransactions(value: unknown): Transaction[] {
       rangeMin: number(item.range_min),
       rangeMax: number(item.range_max),
       expected: text(item.expected_value),
-      unit: text(item.unit_name) ?? text(item.unit),
+      unit: text(item.unit_name) ?? text(item.concept_unit_name) ?? text(item.unit),
     });
   }
   return result;
@@ -190,8 +217,8 @@ function slug(value: string) {
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '') // å → a, ö → o
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 40);
+    .slice(0, 40)
+    .replace(/^-|-$/g, '');
 }
 
 /**
@@ -207,12 +234,11 @@ export function parseActivity(raw: unknown, position: number, contained: Map<str
   const codeText = conceptText(detail?.code) ?? conceptText(raw.code) ?? conceptText(planned?.code);
   const description =
     text(detail?.description) ?? text(raw.description) ?? text(planned?.description) ?? text(raw.textEquivalent);
+  const givenTitle = text(raw.title) ?? codeText ?? text(raw.plannedActivityReference?.display) ?? description;
+  const transactions = parseTransactions(raw.transactions ?? detail?.transactions ?? raw.transaction);
+  if (!transactions.length) transactions.push(...pdhcConcepts(raw));
   const title =
-    text(raw.title) ??
-    codeText ??
-    text(raw.plannedActivityReference?.display) ??
-    description ??
-    `Activity ${position + 1}`;
+    givenTitle ?? (transactions.length ? transactions.map((t) => t.name).join(', ') : `Activity ${position + 1}`);
 
   const timing =
     timingFromFhir(detail?.scheduledTiming) ??
@@ -233,6 +259,8 @@ export function parseActivity(raw: unknown, position: number, contained: Map<str
     text((list(raw.participant)[0] as Json | undefined)?.type) ??
     null;
 
+  // The key only depends on the delivery itself, so it stays the same whether
+  // or not the plan template could be read: stops done are stored per key.
   const id = text(raw.id) ?? text(detail?.id) ?? text(raw.linkId) ?? plannedId;
   return {
     key: id ?? `${position + 1}-${slug(title)}`,
@@ -241,7 +269,8 @@ export function parseActivity(raw: unknown, position: number, contained: Map<str
     performerType,
     status: text(detail?.status) ?? text(raw.status) ?? text(planned?.status) ?? null,
     timing,
-    transactions: parseTransactions(raw.transactions ?? detail?.transactions ?? raw.transaction),
+    transactions,
+    ...(givenTitle ? {} : { derivedTitle: true as const }),
   };
 }
 
@@ -318,6 +347,8 @@ export interface ParsedCarePlan {
   periodEnd: string | null;
   goals: Goal[];
   activities: ParsedActivity[];
+  /** `instantiatesCanonical`: the plan template(s) the care plan was made from. */
+  instantiates: string[];
   fhir: Json;
 }
 
@@ -443,6 +474,13 @@ export function parseDelivery(resource: unknown, context: DeliveryContext = {}):
         .map((goal) => parseGoal(goal, byId))
         .filter((goal): goal is Goal => !!goal),
       activities,
+      instantiates: [
+        ...list(planSource.instantiatesCanonical),
+        // A single plan without its own reference takes the request's.
+        ...(several ? [] : list(serviceRequest.instantiatesCanonical)),
+      ]
+        .map(text)
+        .filter((url, index, all): url is string => !!url && all.indexOf(url) === index),
       fhir: planSource,
     };
   });

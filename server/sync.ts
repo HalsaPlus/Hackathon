@@ -1,6 +1,7 @@
 import { run, now } from './db.ts';
 import { InboundError, parseDelivery } from './fhir.ts';
 import { acknowledge, download, fetchFeed, PdhcError } from './pdhc.ts';
+import { applyPlanTemplates } from './plandefinition.ts';
 import {
   type ConnectionRow,
   getConnection,
@@ -56,6 +57,7 @@ export async function syncConnection(id: number): Promise<{ ok: boolean; message
             contractGuid: body.contract_guid,
             providerOrgGuid: body.provider_org_guid,
           });
+          const problems = await applyPlanTemplates(parsed);
           const outcome = storeDelivery(parsed, {
             channel: 'poll',
             connectionId: connection.id,
@@ -63,7 +65,7 @@ export async function syncConnection(id: number): Promise<{ ok: boolean; message
             pdhcUpdatedAt: item.updated_at,
           });
           counts[outcome] += 1;
-          logInbound('poll', connection.id, parsed.guid, outcome, null);
+          logInbound('poll', connection.id, parsed.guid, outcome, problems.join(' ') || null);
         } catch (error) {
           counts.failed += 1;
           logInbound('poll', connection.id, item.service_request_guid, 'error', errorMessage(error));

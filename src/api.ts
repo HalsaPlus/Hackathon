@@ -1,4 +1,4 @@
-import type { ConnectionView, InboundLogEntry, PatientSummary, PatientView } from '../shared/types.ts';
+import type { ConnectionView, InboundLogEntry, PatientSummary, PatientView, ServiceSettingsView } from '../shared/types.ts';
 
 export async function call<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, body?: unknown): Promise<T> {
   const response = await fetch(url, {
@@ -27,6 +27,16 @@ export interface ConnectionInput {
   pollEnabled: boolean;
 }
 
+/** Per field: leave out to keep, '' or null to remove, a string to replace. */
+export interface ServiceSettingsInput {
+  healthConnectUrl?: string | null;
+  healthConnectToken?: string | null;
+  cdrUrl?: string | null;
+  cdrSourceService?: string | null;
+  cdrServiceKey?: string | null;
+  publicUrl?: string | null;
+}
+
 export const api = {
   patients: () => call<PatientSummary[]>('GET', '/api/patients'),
   patient: (guid: string) => call<PatientView>('GET', `/api/patients/${encodeURIComponent(guid)}`),
@@ -41,4 +51,7 @@ export const api = {
   testConnection: (id: number) => call<ConnectionView>('POST', `/api/connections/${id}/test`),
   syncConnection: (id: number) => call<ConnectionView>('POST', `/api/connections/${id}/sync`),
   inboundLog: () => call<InboundLogEntry[]>('GET', '/api/inbound-log'),
+
+  settings: () => call<ServiceSettingsView>('GET', '/api/settings'),
+  saveSettings: (input: ServiceSettingsInput) => call<ServiceSettingsView>('PUT', '/api/settings', input),
 };

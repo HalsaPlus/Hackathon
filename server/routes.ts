@@ -5,9 +5,11 @@ import { now, run } from './db.ts';
 import { createDemo } from './demo.ts';
 import { InboundError, parseDelivery } from './fhir.ts';
 import { normalizeBaseUrl, PdhcError, testConnection } from './pdhc.ts';
+import { applyPlanTemplates } from './plandefinition.ts';
 import { fetchIpsFromHealthConnect } from './ips.ts';
 import { sendToCdr } from './messaging.ts';
 import { ReportError, reportStop } from './report.ts';
+import { getSettings, saveSettings, SettingsError, toSettingsView } from './settings.ts';
 import {
   activityStops,
   addMessage,
@@ -47,7 +49,7 @@ function operationOutcome(code: string, diagnostics: string) {
  * Must be registered before setupAuth(), since PDHC has no login session.
  */
 export function setupPushEndpoint(app: Express) {
-  app.post('/api/v1/inbound/push', json, (req: Request, res: Response) => {
+  app.post('/api/v1/inbound/push', json, async (req: Request, res: Response) => {
     const secret = req.get('X-Push-Secret') ?? '';
     const connection = secret
       ? listConnections().find((c) => c.push_secret && safeEqual(secret, c.push_secret))
@@ -59,8 +61,9 @@ export function setupPushEndpoint(app: Express) {
 
     try {
       const parsed = parseDelivery(req.body);
+      const problems = await applyPlanTemplates(parsed);
       const outcome = storeDelivery(parsed, { channel: 'push', connectionId: connection.id });
-      logInbound('push', connection.id, parsed.guid, outcome, null);
+      logInbound('push', connection.id, parsed.guid, outcome, problems.join(' ') || null);
       res.status(202).json({ status: 'accepted', service_request_guid: parsed.guid, outcome });
       if (parsed.receiptToken) void acknowledgePush(connection, parsed.guid, parsed.receiptToken);
     } catch (error) {
@@ -216,6 +219,21 @@ export function setupApi(app: Express) {
     res.json(toConnectionView(getConnection(connection.id)!));
   });
 
+  // Health Connect, the CDR and this app's address ------------------------------
+
+  app.get('/api/settings', (_req, res) => {
+    res.json(toSettingsView());
+  });
+
+  app.put('/api/settings', (req, res) => {
+    try {
+      res.json(toSettingsView(saveSettings(req.body)));
+    } catch (error) {
+      if (error instanceof SettingsError) return res.status(400).json({ error: error.message });
+      sendError(res, error);
+    }
+  });
+
   app.get('/api/inbound-log', (_req, res) => {
     res.json(listInboundLog());
   });
@@ -297,7 +315,7 @@ export function setupApi(app: Express) {
   /** Step 11: fetch the IPS through Health Connect (never straight from a CDR). */
   app.post('/api/app/:patient/ips/refresh', async (req, res) => {
     if (!getPatientView(req.params.patient)) return res.status(404).json({ error: 'The patient was not found.' });
-    if (!process.env.HEALTH_CONNECT_URL) {
+    if (!getSettings().healthConnectUrl) {
       return res.status(409).json({ error: 'Health Connect is not configured here, so the app shows the synthetic IPS.' });
     }
     try {
