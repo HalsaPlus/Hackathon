@@ -2,18 +2,17 @@
   "asOf": "2026-11-15T22:59:00Z",
   "items": [
     {
-      "id": "bmi-20260823T060000Z",
+      "id": "bmi-20261101T070000Z",
       "type": "bmi",
-      "status": "final",
       "sourceType": "device",
       "deviceId": "506bfdb7-f834-57d6-8631-9b8ba5a24897",
-      "effectiveDateTime": "2026-08-23T06:00:00Z",
-      "value": 21,
+      "effectiveDateTime": "2026-11-01T07:00:00Z",
+      "value": 21.4,
       "unit": "kg/m²",
       "components": [
         {
           "code": "weight",
-          "value": 59.3,
+          "value": 60.4,
           "unit": "kg"
         },
         {
@@ -21,12 +20,12 @@
           "value": 168,
           "unit": "cm"
         }
-      ]
+      ],
+      "status": "final"
     },
     {
       "id": "bmi-20261108T070000Z",
       "type": "bmi",
-      "status": "final",
       "sourceType": "device",
       "deviceId": "506bfdb7-f834-57d6-8631-9b8ba5a24897",
       "effectiveDateTime": "2026-11-08T07:00:00Z",
@@ -43,12 +42,12 @@
           "value": 168,
           "unit": "cm"
         }
-      ]
+      ],
+      "status": "final"
     },
     {
       "id": "bmi-20261115T070000Z",
       "type": "bmi",
-      "status": "final",
       "sourceType": "device",
       "deviceId": "506bfdb7-f834-57d6-8631-9b8ba5a24897",
       "effectiveDateTime": "2026-11-15T07:00:00Z",
@@ -65,7 +64,8 @@
           "value": 168,
           "unit": "cm"
         }
-      ]
+      ],
+      "status": "final"
     }
   ],
   "nextCursor": null

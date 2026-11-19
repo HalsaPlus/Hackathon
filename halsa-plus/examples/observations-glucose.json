@@ -4,42 +4,42 @@
     {
       "id": "glucose-20260824T163700Z",
       "type": "glucose",
-      "status": "final",
       "sourceType": "device",
       "deviceId": "6f9f647e-3f38-5bb4-a897-75ebf3d250b7",
       "effectiveDateTime": "2026-08-24T16:37:00Z",
       "value": 19.3,
-      "unit": "mmol/L"
+      "unit": "mmol/L",
+      "status": "final"
     },
     {
       "id": "glucose-20260824T165200Z",
       "type": "glucose",
-      "status": "final",
       "sourceType": "device",
       "deviceId": "6f9f647e-3f38-5bb4-a897-75ebf3d250b7",
       "effectiveDateTime": "2026-08-24T16:52:00Z",
       "value": 19.4,
-      "unit": "mmol/L"
+      "unit": "mmol/L",
+      "status": "final"
     },
     {
       "id": "glucose-20260824T170700Z",
       "type": "glucose",
-      "status": "final",
       "sourceType": "device",
       "deviceId": "6f9f647e-3f38-5bb4-a897-75ebf3d250b7",
       "effectiveDateTime": "2026-08-24T17:07:00Z",
       "value": 19.6,
-      "unit": "mmol/L"
+      "unit": "mmol/L",
+      "status": "final"
     },
     {
       "id": "glucose-20260824T172200Z",
       "type": "glucose",
-      "status": "final",
       "sourceType": "device",
       "deviceId": "6f9f647e-3f38-5bb4-a897-75ebf3d250b7",
       "effectiveDateTime": "2026-08-24T17:22:00Z",
       "value": 19.3,
-      "unit": "mmol/L"
+      "unit": "mmol/L",
+      "status": "final"
     }
   ],
   "nextCursor": null

@@ -42,7 +42,8 @@ info:
 
     ## Auth and CORS
     - Every endpoint except `/api/v1/health` needs `Authorization: Bearer <token>`. The token
-      is the value of the env variable `HALSA_API_TOKEN`.
+      is the value of the env variable `HALSA_API_TOKEN`. If the server has no token set,
+      those endpoints answer `503 token_not_configured`.
     - Browsers may call the API from the origins listed in the env variable `CORS_ORIGINS`
       (comma-separated).
 
@@ -122,6 +123,10 @@ paths:
         The list is sorted by time, oldest first, so the newest item is last. Follow
         `nextCursor` to get the next page; it is `null` on the last page.
 
+        "Time" here (for sorting, `from`, `to` and `asOf`) is when an observation becomes
+        available: `effectiveDateTime`, the wake time (`effectivePeriod.end`) for `sleep`, and
+        `issued` for `crp`.
+
         With `format=fhir` the same selection is returned as a FHIR R4 `Bundle` (type
         `searchset`) of `Observation` resources. That format is meant for the care side
         (MMD/PDHC).
@@ -172,6 +177,7 @@ paths:
                 description: FHIR R4 Bundle (type searchset) of Observation resources. See the FhirMapping schema for the codes.
               examples:
                 fhir: { externalValue: examples/observations-fhir.json }
+                fhir-crp: { externalValue: examples/observations-fhir-crp.json }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 

@@ -2,19 +2,18 @@
   "asOf": "2026-11-15T22:59:00Z",
   "items": [
     {
-      "id": "sleep-20261114T064000Z",
+      "id": "sleep-20261113T071500Z",
       "type": "sleep",
-      "status": "final",
       "sourceType": "device",
       "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
       "effectivePeriod": {
-        "start": "2026-11-13T22:55:00Z",
-        "end": "2026-11-14T06:40:00Z"
+        "start": "2026-11-12T23:17:00Z",
+        "end": "2026-11-13T07:15:00Z"
       },
       "components": [
         {
           "code": "sleep-duration",
-          "value": 418,
+          "value": 461,
           "unit": "min"
         },
         {
@@ -22,22 +21,22 @@
           "value": 3,
           "unit": "count"
         }
-      ]
+      ],
+      "status": "final"
     },
     {
-      "id": "sleep-20261115T062500Z",
+      "id": "sleep-20261114T064700Z",
       "type": "sleep",
-      "status": "final",
       "sourceType": "device",
       "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
       "effectivePeriod": {
-        "start": "2026-11-14T22:40:00Z",
-        "end": "2026-11-15T06:25:00Z"
+        "start": "2026-11-13T23:02:00Z",
+        "end": "2026-11-14T06:47:00Z"
       },
       "components": [
         {
           "code": "sleep-duration",
-          "value": 431,
+          "value": 439,
           "unit": "min"
         },
         {
@@ -45,7 +44,31 @@
           "value": 2,
           "unit": "count"
         }
-      ]
+      ],
+      "status": "final"
+    },
+    {
+      "id": "sleep-20261115T062500Z",
+      "type": "sleep",
+      "sourceType": "device",
+      "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
+      "effectivePeriod": {
+        "start": "2026-11-14T22:44:00Z",
+        "end": "2026-11-15T06:25:00Z"
+      },
+      "components": [
+        {
+          "code": "sleep-duration",
+          "value": 441,
+          "unit": "min"
+        },
+        {
+          "code": "awakenings",
+          "value": 3,
+          "unit": "count"
+        }
+      ],
+      "status": "final"
     }
   ],
   "nextCursor": null
