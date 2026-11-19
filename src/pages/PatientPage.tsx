@@ -168,6 +168,20 @@ function RequestCard({ request, patientGuid, onChanged }: { request: ServiceRequ
               <dt>Status</dt>
               <dd>
                 <code>{request.status}</code>
+                {request.pdhcStatus && request.pdhcStatus !== request.status && (
+                  <>
+                    {' '}
+                    · PDHC: <code>{request.pdhcStatus}</code>
+                  </>
+                )}
+              </dd>
+            </div>
+          )}
+          {request.closed && (
+            <div>
+              <dt>In the app</dt>
+              <dd>
+                <span className="pill bad">Closed in PDHC</span> Hidden from the patient and takes no reports.
               </dd>
             </div>
           )}

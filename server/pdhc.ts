@@ -89,7 +89,11 @@ async function call(connection: Connection, method: 'GET' | 'POST', path: string
     let detail = '';
     try {
       const parsed = JSON.parse(textBody);
-      detail = parsed?.message ?? parsed?.error ?? parsed?.issue?.[0]?.diagnostics ?? '';
+      // The gateway lists what was wrong per field in details[].
+      const reasons = Array.isArray(parsed?.details)
+        ? parsed.details.map((d: { field?: string; message?: string }) => [d?.field, d?.message].filter(Boolean).join(': ')).filter(Boolean)
+        : [];
+      detail = [parsed?.message ?? parsed?.error ?? parsed?.issue?.[0]?.diagnostics ?? '', ...reasons].filter(Boolean).join(' – ');
     } catch {
       // Not JSON; the status says enough.
     }
@@ -106,7 +110,10 @@ async function call(connection: Connection, method: 'GET' | 'POST', path: string
 export interface FeedItem {
   service_request_guid: string;
   match_guid?: string;
+  /** The match's status, e.g. "sent". */
   status?: string;
+  /** The request's own status in PDHC, e.g. "active". */
+  sr_status?: string;
   title?: string;
   updated_at?: string;
 }
@@ -133,6 +140,12 @@ export interface Download {
   patient_guid?: string;
   contract_guid?: string;
   provider_org_guid?: string;
+  /** PDHC's status for the request, outside the FHIR resource (e.g. "active", "archived"). */
+  sr_status?: string;
+  is_open?: boolean;
+  /** The patient's instantiated CarePlan, frozen when the request was made. */
+  care_plan_guid?: string;
+  care_plan?: unknown;
 }
 
 export async function download(connection: Connection, serviceRequestGuid: string): Promise<Download> {
@@ -152,7 +165,8 @@ export interface GatewayReport {
   grant_token: string;
   status: 'in-progress' | 'completed';
   report_payload: {
-    observations: { transaction_guid: string; value: string; recorded_at: string; notes?: string }[];
+    /** A numeric value must be a JSON number: the gateway answers 422 "Expected numeric value, got str". */
+    observations: { transaction_guid: string; value: string | number; recorded_at: string; notes?: string }[];
   };
 }
 
@@ -160,7 +174,9 @@ export interface GatewayReport {
  * Sends observations to gateway.pdhc (provider technical manual, section 5).
  * Only transaction_guid, value, recorded_at and notes: the gateway derives
  * concept and unit from the request, and the organisation (the source) from
- * the PAT. Answers `status: "recorded"` when accepted.
+ * the PAT. The manual says it answers `status: "recorded"`; the live gateway
+ * (2026-11-19) answers 202 with `status: "accepted"`, `observations_stored`
+ * and a `receipt_guid`. Both count as received.
  */
 export async function reportToGateway(connection: Connection, gatewayUrl: string, serviceRequestGuid: string, report: GatewayReport) {
   const body = (await call(
@@ -169,8 +185,27 @@ export async function reportToGateway(connection: Connection, gatewayUrl: string
     `/provider/report/${encodeURIComponent(serviceRequestGuid)}`,
     report,
     gatewayUrl,
-  )) as { status?: string; match_status?: string } | undefined;
-  return { status: body?.status ?? 'unknown', matchStatus: body?.match_status ?? null };
+  )) as { status?: string; match_status?: string; receipt_guid?: string; observations_stored?: number } | undefined;
+  const status = body?.status ?? 'unknown';
+  return {
+    status,
+    received: status === 'recorded' || status === 'accepted',
+    matchStatus: body?.match_status ?? null,
+    receiptGuid: body?.receipt_guid ?? null,
+    stored: typeof body?.observations_stored === 'number' ? body.observations_stored : null,
+  };
+}
+
+/**
+ * The value as gateway.pdhc wants it: a JSON number when the transaction is
+ * numeric, or when its type is unknown and the value is a plain number.
+ */
+export function gatewayValue(value: string, responseType: string | undefined): string | number {
+  const isNumber = /^-?\d+(\.\d+)?$/.test(value.trim().replace(',', '.'));
+  if (isNumber && (responseType === undefined || /^(numeric|number|decimal|integer|quantity)$/i.test(responseType))) {
+    return Number(value.trim().replace(',', '.'));
+  }
+  return value;
 }
 
 /** Reads one feed item: proves that the URL and the token work, without downloading patient data. */

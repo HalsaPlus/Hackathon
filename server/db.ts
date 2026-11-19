@@ -242,13 +242,19 @@ db.exec(`
 `);
 
 // Columns added after the tables first shipped in this version.
-for (const [table, column] of [
-  ['messages', 'fhir_json'],
-  ['messages', 'cdr_status'],
-  ['messages', 'cdr_message'],
+for (const [table, column, type] of [
+  ['messages', 'fhir_json', 'TEXT'],
+  ['messages', 'cdr_status', 'TEXT'],
+  ['messages', 'cdr_message', 'TEXT'],
+  // What PDHC says about the request outside the FHIR resource, from
+  // /provider/download: its status (sr_status, e.g. archived), whether it is
+  // still open, and the patient's instantiated CarePlan it was frozen from.
+  ['service_requests', 'pdhc_status', 'TEXT'],
+  ['service_requests', 'is_open', 'INTEGER'],
+  ['service_requests', 'care_plan_guid', 'TEXT'],
 ] as const) {
   const names = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
-  if (!names.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+  if (!names.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 
 export const now = () => new Date().toISOString();

@@ -242,7 +242,7 @@ test('fills in title, schedule and transactions from the plan template on plan.p
   assert.equal(sleep.description, 'rapportera sömntid');
   assert.equal(cgm.derivedTitle, undefined);
   assert.deepEqual(cgm.transactions, [
-    { transactionGuid: 'tx-cgm', conceptGuid: 'c-cgm', name: 'CGM', requirement: 'required', rangeMin: 4, rangeMax: 8, expected: undefined, unit: 'mmol/L' },
+    { transactionGuid: 'tx-cgm', conceptGuid: 'c-cgm', name: 'CGM', requirement: 'required', rangeMin: 4, rangeMax: 8, expected: undefined, unit: 'mmol/L', responseType: undefined },
   ]);
   assert.deepEqual(
     weekly.transactions.map((t) => [t.transactionGuid, t.unit, t.rangeMin, t.rangeMax]),

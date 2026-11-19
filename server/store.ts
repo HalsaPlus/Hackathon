@@ -63,9 +63,19 @@ export interface ServiceRequestRow {
   grant_token: string | null;
   ack_status: string | null;
   pdhc_updated_at: string | null;
+  pdhc_status: string | null;
+  is_open: number | null;
+  care_plan_guid: string | null;
   checksum: string;
   received_at: string;
   updated_at: string;
+}
+
+/** sr_status values that mean PDHC has closed the request. */
+const CLOSED_STATUSES = new Set(['archived', 'revoked', 'completed', 'cancelled', 'entered-in-error']);
+
+export function isClosed(row: Pick<ServiceRequestRow, 'is_open' | 'pdhc_status'>) {
+  return row.is_open === 0 || (row.pdhc_status !== null && CLOSED_STATUSES.has(row.pdhc_status));
 }
 
 interface CarePlanRow {
@@ -273,12 +283,18 @@ export function storeDelivery(parsed: ParsedDelivery, options: StoreOptions): 'c
       receiptToken: parsed.receiptToken ?? existing?.receipt_token ?? null,
       grantToken: parsed.grantToken ?? existing?.grant_token ?? null,
       pdhcUpdatedAt: options.pdhcUpdatedAt ?? existing?.pdhc_updated_at ?? null,
+      // PDHC's status lives outside the FHIR resource, so it can change while
+      // the resource does not.
+      pdhcStatus: parsed.pdhcStatus ?? existing?.pdhc_status ?? null,
+      isOpen: parsed.isOpen ?? (existing?.is_open == null ? null : existing.is_open === 1),
+      carePlanGuid: parsed.carePlanGuid ?? existing?.care_plan_guid ?? null,
     };
 
     if (existing && existing.checksum === checksum) {
       run(
         `UPDATE service_requests SET connection_id = :connectionId, receipt_token = :receiptToken,
-           grant_token = :grantToken, pdhc_updated_at = :pdhcUpdatedAt WHERE guid = :guid`,
+           grant_token = :grantToken, pdhc_updated_at = :pdhcUpdatedAt, pdhc_status = :pdhcStatus,
+           is_open = :isOpen, care_plan_guid = :carePlanGuid WHERE guid = :guid`,
         keys,
       );
       return 'unchanged';
@@ -311,6 +327,7 @@ export function storeDelivery(parsed: ParsedDelivery, options: StoreOptions): 'c
            period_start = :periodStart, period_end = :periodEnd, period_end_given = :periodEndGiven,
            contract_guid = :contractGuid, provider_org_guid = :providerOrgGuid, match_guid = COALESCE(:matchGuid, match_guid),
            receipt_token = :receiptToken, grant_token = :grantToken, pdhc_updated_at = :pdhcUpdatedAt,
+           pdhc_status = :pdhcStatus, is_open = :isOpen, care_plan_guid = :carePlanGuid,
            checksum = :checksum, fhir_json = :fhir, updated_at = :at
          WHERE guid = :guid`,
         values,
@@ -320,10 +337,12 @@ export function storeDelivery(parsed: ParsedDelivery, options: StoreOptions): 'c
       run(
         `INSERT INTO service_requests (guid, connection_id, patient_guid, source, status, intent, priority, title,
            authored_on, period_start, period_end, period_end_given, contract_guid, provider_org_guid, match_guid,
-           receipt_token, grant_token, pdhc_updated_at, checksum, fhir_json, received_at, updated_at)
+           receipt_token, grant_token, pdhc_updated_at, pdhc_status, is_open, care_plan_guid, checksum, fhir_json,
+           received_at, updated_at)
          VALUES (:guid, :connectionId, :patientGuid, :source, :status, :intent, :priority, :title,
            :authoredOn, :periodStart, :periodEnd, :periodEndGiven, :contractGuid, :providerOrgGuid, :matchGuid,
-           :receiptToken, :grantToken, :pdhcUpdatedAt, :checksum, :fhir, :at, :at)`,
+           :receiptToken, :grantToken, :pdhcUpdatedAt, :pdhcStatus, :isOpen, :carePlanGuid, :checksum, :fhir,
+           :at, :at)`,
         values,
       );
     }
@@ -332,6 +351,26 @@ export function storeDelivery(parsed: ParsedDelivery, options: StoreOptions): 'c
     if (!existing) addMessage(parsed.patient.guid, 'system', 'New plan from the care team', parsed.guid, timestamp);
     return existing ? 'updated' : 'created';
   });
+}
+
+/** Requests fetched through this connection's feed that MMD still treats as open. */
+export function openRequestGuids(connectionId: number): string[] {
+  return all<Pick<ServiceRequestRow, 'guid' | 'is_open' | 'pdhc_status'>>(
+    "SELECT guid, is_open, pdhc_status FROM service_requests WHERE connection_id = :connectionId AND source = 'poll'",
+    { connectionId },
+  )
+    .filter((row) => !isClosed(row))
+    .map((row) => row.guid);
+}
+
+/** Saves what PDHC says about a request's state, without touching the plan. */
+export function setPdhcState(guid: string, state: { status: string | null; isOpen: boolean | null; carePlanGuid?: string | null }) {
+  run(
+    `UPDATE service_requests SET pdhc_status = COALESCE(:status, pdhc_status), is_open = COALESCE(:isOpen, is_open),
+       care_plan_guid = COALESCE(:carePlanGuid, care_plan_guid), updated_at = :at WHERE guid = :guid`,
+    { guid, status: state.status, isOpen: state.isOpen, carePlanGuid: state.carePlanGuid ?? null, at: now() },
+  );
+  return isClosed(get<ServiceRequestRow>('SELECT * FROM service_requests WHERE guid = :guid', { guid }) ?? { is_open: null, pdhc_status: null });
 }
 
 export function setAckStatus(guid: string, status: string) {
@@ -478,6 +517,9 @@ function requestView(row: ServiceRequestRow): ServiceRequestView {
     updatedAt: row.updated_at,
     ackStatus: row.ack_status,
     hasGrantToken: !!row.grant_token,
+    pdhcStatus: row.pdhc_status,
+    closed: isClosed(row),
+    carePlanGuid: row.care_plan_guid,
     seenAt: row.seen_at,
     carePlans: carePlans.map((plan) => ({
       id: planIdOf(plan),

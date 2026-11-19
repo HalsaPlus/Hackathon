@@ -446,6 +446,18 @@ code,
   margin: 0.2rem 0;
 }
 
+.test-report {
+  margin-top: 1rem;
+}
+
+.test-report h3 {
+  margin: 0 0 0.5rem;
+}
+
+.test-report td {
+  vertical-align: top;
+}
+
 .copy-row {
   display: flex;
   align-items: center;
