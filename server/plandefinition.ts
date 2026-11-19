@@ -1,5 +1,5 @@
 import type { Transaction } from '../shared/types.ts';
-import { type ParsedActivity, type ParsedDelivery, parseTransactions, timingFromPdhcFields } from './fhir.ts';
+import { type ParsedActivity, type ParsedDelivery, parseActivity } from './fhir.ts';
 
 // The CarePlan that request.pdhc delivers only says which concepts each
 // activity measures. Title, schedule, performer, ranges, units and transaction
@@ -9,9 +9,12 @@ import { type ParsedActivity, type ParsedDelivery, parseTransactions, timingFrom
 //   GET https://plan.pdhc.se/api/v1/plandefinitions/{guid}
 //
 // Its `activities[]` carry plan.pdhc's flat `timing_*` fields and
-// `transactions[]`, in `sort_order`. Each delivered activity is matched to a
-// template activity by the concepts it measures, or failing that by position.
-// What the delivery says always wins; the template only fills in what is missing.
+// `transactions[]`, in `sort_order`. plan.pdhc also renders templates as FHIR
+// R5 (`action[]` with `timingTiming`, `participant` and nested `action[]` per
+// concept); both are read with the same parser as the delivery. Each delivered
+// activity is matched to a template activity by the concepts it measures, or
+// failing that by position. What the delivery says always wins; the template
+// only fills in what is missing.
 
 type Json = Record<string, any>;
 
@@ -60,8 +63,11 @@ export const fetchPlanDefinition: TemplateLoader = async (url) => {
   return template;
 };
 
-/** The template's activities in order: `activities[]`, or the older `action` (an array or a JSON string). */
-function templateActivities(template: Json): Json[] {
+/**
+ * The template's activities in order, parsed: `activities[]`, or `action`
+ * (plan.pdhc's flat actions as an array or a JSON string, or FHIR actions).
+ */
+function templateActivities(template: Json): ParsedActivity[] {
   let raw: unknown = template.activities;
   if (!Array.isArray(raw) || raw.length === 0) raw = template.action ?? template.fhir_data?.action;
   if (typeof raw === 'string') {
@@ -75,31 +81,31 @@ function templateActivities(template: Json): Json[] {
   return activities
     .map((activity, index) => ({ activity, order: typeof activity.sort_order === 'number' ? activity.sort_order : index }))
     .sort((a, b) => a.order - b.order)
-    .map((entry) => entry.activity);
+    .map((entry, position) => parseActivity(entry.activity, position, new Map()))
+    .filter((activity): activity is ParsedActivity => !!activity);
 }
 
 const conceptsOf = (transactions: Transaction[]) =>
   new Set(transactions.map((t) => t.conceptGuid).filter((guid): guid is string => !!guid));
 
 /** For each delivered activity, the template activity it was made from. */
-function matchActivities(activities: ParsedActivity[], template: Json[]) {
-  const templateTransactions = template.map((t) => parseTransactions(t.transactions));
+function matchActivities(activities: ParsedActivity[], template: ParsedActivity[]) {
   const used = new Set<number>();
   return activities.map((activity, position) => {
     const wanted = conceptsOf(activity.transactions);
     let best = -1;
     let bestOverlap = 0;
     if (wanted.size) {
-      templateTransactions.forEach((transactions, index) => {
+      template.forEach((candidate, index) => {
         if (used.has(index)) return;
-        const overlap = [...conceptsOf(transactions)].filter((guid) => wanted.has(guid)).length;
+        const overlap = [...conceptsOf(candidate.transactions)].filter((guid) => wanted.has(guid)).length;
         if (overlap > bestOverlap) [best, bestOverlap] = [index, overlap];
       });
     }
     if (best === -1 && position < template.length && !used.has(position)) best = position;
     if (best === -1) return undefined;
     used.add(best);
-    return { template: template[best], transactions: templateTransactions[best] };
+    return template[best];
   });
 }
 
@@ -109,23 +115,23 @@ function mergeTransaction(fromTemplate: Transaction, delivered: Transaction): Tr
   return { ...fromTemplate, ...given } as Transaction;
 }
 
-function fillIn(activity: ParsedActivity, template: Json, templateTransactions: Transaction[]) {
-  const title = typeof template.title === 'string' ? template.title.trim() : '';
-  if (activity.derivedTitle && title) {
-    activity.title = title;
+function fillIn(activity: ParsedActivity, template: ParsedActivity) {
+  if (activity.derivedTitle && !template.derivedTitle) {
+    activity.title = template.title;
     delete activity.derivedTitle;
   }
-  const description = typeof template.description === 'string' ? template.description.trim() : '';
-  if (!activity.description && description && description !== activity.title) activity.description = description;
-  if (!activity.performerType && typeof template.performer_type === 'string') activity.performerType = template.performer_type;
-  if (activity.timing.kind === 'unscheduled') activity.timing = timingFromPdhcFields(template) ?? activity.timing;
+  if (!activity.description && template.description && template.description !== activity.title) {
+    activity.description = template.description;
+  }
+  activity.performerType ??= template.performerType;
+  if (activity.timing.kind === 'unscheduled') activity.timing = template.timing;
 
   if (!activity.transactions.length) {
-    activity.transactions = templateTransactions;
+    activity.transactions = template.transactions;
     return;
   }
   activity.transactions = activity.transactions.map((delivered) => {
-    const match = templateTransactions.find((t) => t.conceptGuid && t.conceptGuid === delivered.conceptGuid);
+    const match = template.transactions.find((t) => t.conceptGuid && t.conceptGuid === delivered.conceptGuid);
     return match ? mergeTransaction(match, delivered) : delivered;
   });
 }
@@ -143,7 +149,7 @@ export async function applyPlanTemplates(parsed: ParsedDelivery, load: TemplateL
     try {
       const template = templateActivities(await load(url));
       matchActivities(plan.activities, template).forEach((match, index) => {
-        if (match) fillIn(plan.activities[index], match.template, match.transactions);
+        if (match) fillIn(plan.activities[index], match);
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'unknown error';
