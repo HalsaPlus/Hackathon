@@ -113,7 +113,7 @@ test('devices: last sync never after asOf', async () => {
 test('latest: one item per type', async () => {
   const { items } = await json('/api/v1/observations/latest?asOf=2026-11-15T22:59:00Z');
   assert.deepEqual(items.map((o: { type: string }) => o.type), ['blood-pressure', 'glucose', 'sleep', 'steps', 'energy', 'mood', 'stress', 'anxiety', 'depression', 'bmi', 'crp']);
-  assert.equal(items[1].value, 11);
+  assert.equal(items[1].value, 9.2); // 11.0 in the Hälsa+ demo's history, lowered by the recovery after discharge (recovery.ts)
 });
 
 test('no interpretation or statistics anywhere in the responses', async () => {
@@ -222,4 +222,15 @@ test('overview: six categories scored against demo ranges, null without data, to
   // The detail list: latest value per type, never after asOf.
   for (const m of body.categories[5].measures) assert.ok(m.latest && (m.latest.effectivePeriod?.end ?? m.latest.effectiveDateTime) <= asOf, m.id);
   assert.deepEqual(body.categories[5].measures.map((m: Body) => m.name), ['Sleep', 'Energy', 'Mood', 'Stress', 'Anxiety', 'Depression']);
+});
+
+test('the demo (Friday 2026-11-20 15:00): an uneven recovery, Hormones about 55–70 %, Mental health about 70–85 %', async () => {
+  const body = await json('/api/v1/overview?asOf=2026-11-20T15:00:00Z');
+  const score = (id: string) => body.categories.find((c: Body) => c.id === id).score;
+  assert.ok(score('hormones') >= 55 && score('hormones') <= 70, `Hormones ${score('hormones')}`);
+  assert.ok(score('mental-health') >= 70 && score('mental-health') <= 85, `Mental health ${score('mental-health')}`);
+  // Worse a few weeks after discharge than at the demo: the recovery takes time.
+  const september = await json('/api/v1/overview?asOf=2026-09-15T12:00:00Z');
+  const earlier = (id: string) => september.categories.find((c: Body) => c.id === id).score;
+  assert.ok(earlier('hormones') < score('hormones') && earlier('mental-health') < score('mental-health'));
 });

@@ -135,7 +135,7 @@
         },
         "effectiveDateTime": "2026-11-15T20:07:00Z",
         "valueQuantity": {
-          "value": 11.5,
+          "value": 9.7,
           "unit": "mmol/L",
           "system": "http://unitsofmeasure.org",
           "code": "mmol/L"
@@ -184,7 +184,7 @@
         },
         "effectiveDateTime": "2026-11-15T20:22:00Z",
         "valueQuantity": {
-          "value": 11.2,
+          "value": 9.4,
           "unit": "mmol/L",
           "system": "http://unitsofmeasure.org",
           "code": "mmol/L"
@@ -233,7 +233,7 @@
         },
         "effectiveDateTime": "2026-11-15T20:37:00Z",
         "valueQuantity": {
-          "value": 11.3,
+          "value": 9.5,
           "unit": "mmol/L",
           "system": "http://unitsofmeasure.org",
           "code": "mmol/L"
@@ -282,7 +282,7 @@
         },
         "effectiveDateTime": "2026-11-15T20:52:00Z",
         "valueQuantity": {
-          "value": 11.4,
+          "value": 9.6,
           "unit": "mmol/L",
           "system": "http://unitsofmeasure.org",
           "code": "mmol/L"
@@ -331,7 +331,7 @@
         },
         "effectiveDateTime": "2026-11-15T21:07:00Z",
         "valueQuantity": {
-          "value": 11.1,
+          "value": 9.3,
           "unit": "mmol/L",
           "system": "http://unitsofmeasure.org",
           "code": "mmol/L"

@@ -5,6 +5,7 @@
 import { CRP_LAB, CRP_RESULTS } from './crp.ts';
 import { generateExtension } from './extension.ts';
 import { generateHistory, HISTORY } from './history.ts';
+import { recoveredGlucose } from './recovery.ts';
 import { addDays, parisDate, parisTime } from './time.ts';
 import { generateRatings, generateSleep, generateSteps } from './wellbeing.ts';
 
@@ -107,7 +108,7 @@ export function buildDataset(startDate: string): Dataset {
 
   for (const r of [...history.glucose, ...extension.glucose]) {
     const ms = Date.parse(r.at);
-    add(ms, { id: idFor('glucose', ms), type: 'glucose', sourceType: 'device', deviceId: CGM, effectiveDateTime: isoTime(ms), value: r.value, unit: 'mmol/L' });
+    add(ms, { id: idFor('glucose', ms), type: 'glucose', sourceType: 'device', deviceId: CGM, effectiveDateTime: isoTime(ms), value: recoveredGlucose(ms, r.value), unit: 'mmol/L' });
   }
   for (const r of [...history.bp, ...extension.bp]) {
     const ms = Date.parse(r.at);

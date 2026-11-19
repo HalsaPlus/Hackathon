@@ -21,8 +21,10 @@ const dayIndex = (date: string) => (Date.parse(`${date}T00:00:00Z`) - Date.parse
 function strain(t: number) {
   if (t < T_DECLINE) return 0;
   if (t < T_DISCHARGE) return lerp(0, 1, (t - T_DECLINE) / (T_ER - T_DECLINE));
-  // After discharge: down gradually, with uneven weeks.
-  return clamp(0.7 * Math.exp(-(t - T_DISCHARGE) / 35) + 0.08 * Math.sin((t - T_DISCHARGE) / 4.5), 0, 1);
+  // After discharge: down slowly, and months later still not back to spring,
+  // with better and worse weeks (a crisis takes time).
+  const d = t - T_DISCHARGE;
+  return clamp(0.52 + 0.3 * Math.exp(-d / 40) + 0.14 * Math.sin(d / 4.5) + 0.08 * Math.sin(d / 11 + 2), 0, 1);
 }
 
 export interface SleepNight {

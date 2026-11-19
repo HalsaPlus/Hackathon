@@ -9,10 +9,11 @@ import { ANDREA, ANDREA_DEVICES, buildDataset, dataWindow, type Entry } from './
 // touched.
 //
 // DATA_VERSION goes up when the generator itself changes (version 2: the
-// self-ratings are 1–7, and steps, energy, mood and depression are new). An
+// self-ratings are 1–7, and steps, energy, mood and depression are new;
+// version 3: an uneven recovery after discharge for glucose and wellbeing). An
 // older database then gets its generated rows replaced once.
 
-export const DATA_VERSION = 2;
+export const DATA_VERSION = 3;
 
 export function seedAndrea(database: Database, startDate: string) {
   const window = dataWindow(startDate);
