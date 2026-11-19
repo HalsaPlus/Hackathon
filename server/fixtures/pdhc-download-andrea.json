@@ -1,0 +1,96 @@
+{
+  "service_request_guid": "d6b81ca3-5149-46d5-9ba1-582716f263b2",
+  "patient_guid": "28a29239-6424-48e7-a123-9d9e863670b8",
+  "fhir_resource": {
+    "resourceType": "ServiceRequest",
+    "id": "d6b81ca3-5149-46d5-9ba1-582716f263b2",
+    "status": "active",
+    "intent": "order",
+    "subject": { "reference": "#patient-28a29239-6424-48e7-a123-9d9e863670b8", "display": "Andrea Lindqvist" },
+    "authoredOn": "2026-11-19T16:07:00Z",
+    "instantiatesCanonical": ["https://plan.pdhc.se/api/v1/plandefinitions/58a17c40-a89e-46fb-b095-4336e45f33fe"],
+    "contained": [
+      {
+        "resourceType": "Patient",
+        "id": "patient-28a29239-6424-48e7-a123-9d9e863670b8",
+        "name": [{ "text": "Andrea Lindqvist", "family": "Lindqvist", "given": ["Andrea"] }]
+      },
+      {
+        "resourceType": "Goal",
+        "id": "goal-0",
+        "lifecycleStatus": "active",
+        "description": {
+          "coding": [{ "system": "urn:pdhc:concept", "code": "d83a8dac-523f-4d51-a602-654430dc7604", "display": "cgm_mean_glucose" }],
+          "text": "cgm_mean_glucose"
+        },
+        "subject": { "reference": "#patient-28a29239-6424-48e7-a123-9d9e863670b8" },
+        "target": [
+          {
+            "measure": { "coding": [{ "system": "urn:pdhc:concept", "code": "d83a8dac-523f-4d51-a602-654430dc7604", "display": "cgm_mean_glucose" }] },
+            "detailRange": { "low": { "value": 4 }, "high": { "value": 8 } }
+          }
+        ]
+      },
+      {
+        "resourceType": "CarePlan",
+        "id": "careplan-d6b81ca3-5149-46d5-9ba1-582716f263b2",
+        "title": "MMD_plan",
+        "status": "active",
+        "intent": "plan",
+        "subject": { "reference": "#patient-28a29239-6424-48e7-a123-9d9e863670b8" },
+        "instantiatesCanonical": ["https://plan.pdhc.se/api/v1/plandefinitions/58a17c40-a89e-46fb-b095-4336e45f33fe"],
+        "goal": [{ "reference": "#goal-0" }],
+        "activity": [
+          {
+            "performedActivity": [
+              {
+                "concept": {
+                  "coding": [{ "system": "urn:pdhc:concept", "code": "22d0f6c6-2438-4637-ad4e-9d85431b8edb", "display": "CGM" }],
+                  "text": "CGM"
+                }
+              }
+            ]
+          },
+          {
+            "performedActivity": [
+              {
+                "concept": {
+                  "coding": [{ "system": "urn:pdhc:concept", "code": "9bbc1c9e-f33c-4271-a71b-4242e58c2161", "display": "sleep-duration" }],
+                  "text": "sleep-duration"
+                }
+              }
+            ]
+          },
+          {
+            "performedActivity": [
+              {
+                "concept": {
+                  "coding": [{ "system": "urn:pdhc:concept", "code": "abf6ba5f-0b82-4163-94ec-4b6eb111cd2b", "display": "systolic-blood-pressure" }],
+                  "text": "systolic-blood-pressure"
+                }
+              },
+              {
+                "concept": {
+                  "coding": [{ "system": "urn:pdhc:concept", "code": "c6824284-13a3-4241-a88f-f6e58b6a8d4d", "display": "diastolic-blood-pressure" }],
+                  "text": "diastolic-blood-pressure"
+                }
+              },
+              {
+                "concept": {
+                  "coding": [{ "system": "urn:pdhc:concept", "code": "739ae368-f0df-4b14-a6bb-98affed01e3d", "display": "anxiety" }],
+                  "text": "anxiety"
+                }
+              },
+              {
+                "concept": {
+                  "coding": [{ "system": "urn:pdhc:concept", "code": "d3cb5dfe-23c4-4499-ba7b-e9c5481f43a4", "display": "stress" }],
+                  "text": "stress"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
