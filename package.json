@@ -1,0 +1,31 @@
+{
+  "name": "mmd",
+  "private": true,
+  "version": "0.1.0",
+  "description": "MMD – patientens vårdplan från PDHC, ritad som en tunnelbanekarta",
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "node --watch-path=server server/index.ts",
+    "build": "tsc --noEmit && vite build",
+    "start": "NODE_ENV=production node server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test server/*.test.ts"
+  },
+  "dependencies": {
+    "express": "^5.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}
