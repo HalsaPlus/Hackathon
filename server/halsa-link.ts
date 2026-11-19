@@ -1,6 +1,23 @@
-import type { Express, Request, Response } from 'express';
-import { HALSA_TYPES, type HalsaObservation, type HalsaPoint, type HalsaPoints, type HalsaType, pointsFromObservation } from '../shared/halsa.ts';
+import express from 'express';
+import type { Express, NextFunction, Request, Response } from 'express';
+import {
+  displayRange,
+  displayValue,
+  HALSA_RATINGS,
+  HALSA_TYPES,
+  type HalsaConsent,
+  type HalsaObservation,
+  type HalsaOverview,
+  type HalsaPoint,
+  type HalsaPoints,
+  type HalsaType,
+  type HalsaVaccination,
+  isHalsaRating,
+  type OverviewCategory,
+  pointsFromObservation,
+} from '../shared/halsa.ts';
 import { db, get, now, run } from './db.ts';
+import { getServiceRequestRow } from './store.ts';
 
 // The link between an MMD patient and the same patient's Hälsa+ account.
 //
@@ -156,15 +173,123 @@ export async function readLatestHalsa(token: string, input: { types?: unknown; a
   return { asOf: latest.asOf, points: latest.items.flatMap((item) => pointsFromObservation(item, names)) };
 }
 
-/** A 0–10 self-rating the patient gave in the app, written to Hälsa+ as well. */
+/** A 1–7 self-rating the patient gave in the app, written to Hälsa+ as well. */
 export async function writeHalsaRating(token: string, input: { type?: unknown; value?: unknown; asOf?: unknown }): Promise<HalsaPoint[]> {
   const type = input.type;
-  if (type !== 'anxiety' && type !== 'stress') throw new HalsaError('Only anxiety and stress ratings are written to Hälsa+.', 400);
+  if (typeof type !== 'string' || !isHalsaRating(type)) throw new HalsaError(`Only ${HALSA_RATINGS.join(', ')} ratings are written to Hälsa+.`, 400);
   const value = Number(input.value);
-  if (!Number.isInteger(value) || value < 0 || value > 10) throw new HalsaError('A rating is a whole number from 0 to 10.', 400);
+  if (!Number.isInteger(value) || value < 1 || value > 7) throw new HalsaError('A rating is a whole number from 1 to 7.', 400);
   const asOf = cleanTime(input.asOf, 'asOf');
   const created = await halsaFetch<HalsaObservation>(token, '/observations', { asOf }, { type, value });
   return pointsFromObservation(created, await deviceNames(token, asOf));
+}
+
+interface OverviewBody {
+  asOf: string;
+  healthScore: number | null;
+  categories: (Omit<OverviewCategory, 'measures'> & {
+    measures: {
+      id: string;
+      name: string;
+      available: boolean;
+      demoRanges: { component?: string; low: number; high: number; unit: string }[];
+      latest: (HalsaObservation & { status?: string }) | null;
+    }[];
+  })[];
+}
+
+/** Hälsa+'s health overview (scores against demo ranges), with each latest value ready to show. */
+export async function readHalsaOverview(token: string, input: { asOf?: unknown }): Promise<HalsaOverview> {
+  const asOf = cleanTime(input.asOf, 'asOf');
+  const [overview, names] = await Promise.all([halsaFetch<OverviewBody>(token, '/overview', { asOf }), deviceNames(token, asOf)]);
+  return {
+    asOf: overview.asOf,
+    healthScore: overview.healthScore,
+    demoRanges: true,
+    categories: overview.categories.map((c) => ({
+      id: c.id,
+      name: c.name,
+      score: c.score,
+      available: c.available,
+      total: c.total,
+      measures: c.measures.map((m) => {
+        const shown = m.latest ? displayValue(m.latest) : undefined;
+        const latest = m.latest;
+        return {
+          id: m.id,
+          name: m.name,
+          available: m.available,
+          range: displayRange(m.demoRanges),
+          latest:
+            latest && shown
+              ? {
+                  ...shown,
+                  time: (latest.type === 'sleep' ? latest.effectivePeriod?.end : latest.effectiveDateTime) ?? overview.asOf,
+                  device: latest.deviceId ? (names.get(latest.deviceId) ?? null) : null,
+                  status: latest.status === 'preliminary' ? 'preliminary' : 'final',
+                }
+              : null,
+        };
+      }),
+    })),
+  };
+}
+
+export async function readHalsaVaccinations(token: string): Promise<HalsaVaccination[]> {
+  const body = await halsaFetch<{ items?: HalsaVaccination[] }>(token, '/vaccinations');
+  return body.items ?? [];
+}
+
+/** The patient's consent decisions for a PDHC request in Hälsa+; the latest applies. */
+export async function readHalsaConsent(token: string, requestGuid: string): Promise<HalsaConsent> {
+  const body = await halsaFetch<{ items?: { decision: 'accept' | 'decline'; decidedAt: string }[] }>(
+    token,
+    `/requests/${encodeURIComponent(requestGuid)}/consent`,
+  );
+  const history = (body.items ?? []).map((d) => ({ decision: d.decision, decidedAt: d.decidedAt }));
+  const latest = history.at(-1);
+  return { decision: latest?.decision ?? null, decidedAt: latest?.decidedAt ?? null, history };
+}
+
+/** Adds a decision to Hälsa+'s append-only consent log. */
+export async function writeHalsaConsent(token: string, requestGuid: string, decision: unknown): Promise<HalsaConsent> {
+  if (decision !== 'accept' && decision !== 'decline') throw new HalsaError('The decision is "accept" or "decline".', 400);
+  await halsaFetch(token, `/requests/${encodeURIComponent(requestGuid)}/consent`, {}, { decision });
+  return readHalsaConsent(token, requestGuid);
+}
+
+/** The request, if it is this patient's. */
+function ownRequest(patientGuid: string, requestGuid: string) {
+  const request = getServiceRequestRow(requestGuid);
+  return request && request.patient_guid === patientGuid ? request : undefined;
+}
+
+export const NO_CONSENT_MESSAGE =
+  'You have not agreed to share your values for this plan, so nothing was sent. Open the plan and choose "Share my values" first.';
+
+/**
+ * The server side of consent: for a patient linked to Hälsa+, MMD sends no
+ * report for a request unless the latest decision in Hälsa+ is "accept".
+ * Register before setupApi(), after setupAuth(). Patients without a link,
+ * and every other route, pass through untouched.
+ */
+export function setupHalsaConsentGuard(app: Express) {
+  // Same parser as routes.ts; the body is then already parsed when setupApi()'s parser sees it.
+  const json = express.json({ type: ['application/json', 'application/fhir+json'], limit: '5mb' });
+  app.post('/api/app/:patient/report', json, async (req: Request, res: Response, next: NextFunction) => {
+    const token = halsaTokenFor(String(req.params.patient));
+    const requestGuid = typeof req.body?.serviceRequestGuid === 'string' ? req.body.serviceRequestGuid : '';
+    if (!token || !requestGuid) return next();
+    try {
+      const consent = await readHalsaConsent(token, requestGuid);
+      if (consent.decision === 'accept') return next();
+      res.status(403).json({ error: NO_CONSENT_MESSAGE, consent: consent.decision ?? 'none' });
+    } catch (error) {
+      // Without an answer from Hälsa+ there is no consent to rely on: send nothing.
+      const reason = error instanceof HalsaError ? error.message : 'Hälsa+ could not be asked.';
+      res.status(502).json({ error: `Your consent could not be checked, so nothing was sent. ${reason}` });
+    }
+  });
 }
 
 function linkedToken(req: Request, res: Response): string | undefined {
@@ -206,7 +331,52 @@ export function setupHalsaLink(app: Express) {
     }
   });
 
-  /** Body { type: 'anxiety' | 'stress', value: 0–10 }; ?asOf= for the demo clock. */
+  /** The health overview: six categories with scores against demo ranges. ?asOf= */
+  app.get('/api/app/:patient/halsa/overview', async (req, res) => {
+    const token = linkedToken(req, res);
+    if (!token) return;
+    try {
+      res.json(await readHalsaOverview(token, { asOf: req.query.asOf }));
+    } catch (error) {
+      sendHalsaError(res, error);
+    }
+  });
+
+  app.get('/api/app/:patient/halsa/vaccinations', async (req, res) => {
+    const token = linkedToken(req, res);
+    if (!token) return;
+    try {
+      res.json({ items: await readHalsaVaccinations(token) });
+    } catch (error) {
+      sendHalsaError(res, error);
+    }
+  });
+
+  /** Her consent for one of her PDHC requests, as stored in Hälsa+. */
+  app.get('/api/app/:patient/halsa/consent/:sr', async (req, res) => {
+    const token = linkedToken(req, res);
+    if (!token) return;
+    if (!ownRequest(String(req.params.patient), String(req.params.sr))) return res.status(404).json({ error: 'The plan was not found.' });
+    try {
+      res.json(await readHalsaConsent(token, String(req.params.sr)));
+    } catch (error) {
+      sendHalsaError(res, error);
+    }
+  });
+
+  /** Body { decision: 'accept' | 'decline' }. Added to Hälsa+'s append-only log. */
+  app.post('/api/app/:patient/halsa/consent/:sr', async (req, res) => {
+    const token = linkedToken(req, res);
+    if (!token) return;
+    if (!ownRequest(String(req.params.patient), String(req.params.sr))) return res.status(404).json({ error: 'The plan was not found.' });
+    try {
+      res.status(201).json(await writeHalsaConsent(token, String(req.params.sr), (req.body ?? {}).decision));
+    } catch (error) {
+      sendHalsaError(res, error);
+    }
+  });
+
+  /** Body { type: a 1–7 rating type, value: 1–7 }; ?asOf= for the demo clock. */
   app.post('/api/app/:patient/halsa/observations', async (req, res) => {
     const token = linkedToken(req, res);
     if (!token) return;

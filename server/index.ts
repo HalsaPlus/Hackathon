@@ -5,7 +5,7 @@ import path from 'node:path';
 import express from 'express';
 import { halsaPlusFromEnv } from '../halsa-plus/src/mount.ts';
 import { loginConfigured, setupAuth } from './auth.ts';
-import { setupHalsaLink } from './halsa-link.ts';
+import { setupHalsaConsentGuard, setupHalsaLink } from './halsa-link.ts';
 import { setupApi, setupPushEndpoint } from './routes.ts';
 import { startPolling } from './sync.ts';
 
@@ -63,6 +63,7 @@ if (!loginConfigured) {
 
 // --- API -------------------------------------------------------------------
 
+setupHalsaConsentGuard(app);
 setupApi(app);
 setupHalsaLink(app);
 

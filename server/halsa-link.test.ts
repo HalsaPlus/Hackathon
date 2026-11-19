@@ -12,8 +12,9 @@ delete process.env.HALSA_ANDREA_TOKEN;
 delete process.env.HALSA_PLUS_URL;
 
 const { halsaSeriesFor, minutesToHours, pointsFromObservation } = await import('../shared/halsa.ts');
-const { ANDREA_GUID, halsaTokenFor, saveHalsaLink, removeHalsaLink, setupHalsaLink } = await import('./halsa-link.ts');
-const { halsaReading, measureAsOf, prefilledValue, cameFrom } = await import('../src/app/halsa.ts');
+const { ANDREA_GUID, halsaTokenFor, saveHalsaLink, removeHalsaLink, setupHalsaLink, setupHalsaConsentGuard, NO_CONSENT_MESSAGE } = await import('./halsa-link.ts');
+const { halsaReading, measureAsOf, prefilledValue, cameFrom, maySend, requestedData } = await import('../src/app/halsa.ts');
+const { getServiceRequestRow } = await import('./store.ts');
 const { simulate, simulationFor } = await import('../src/app/healthkit.ts');
 const { parseDelivery } = await import('./fhir.ts');
 const { applyPlanTemplates } = await import('./plandefinition.ts');
@@ -160,6 +161,7 @@ const NOW = Date.parse('2026-11-19T12:00:00Z');
 const AS_OF = '2026-11-19T12:00:00.000Z';
 const ANDREA_TOKEN = `hp_test_${randomBytes(18).toString('base64url')}`;
 const servers: { close: () => void }[] = [];
+const reportsReached: unknown[] = [];
 let mmd = '';
 
 async function listen(app: express.Express) {
@@ -174,8 +176,15 @@ before(async () => {
   halsa.use('/halsa-plus', createApp({ database: openDatabase(':memory:'), corsOrigins: [], now: () => NOW, andreaToken: ANDREA_TOKEN }));
   process.env.HALSA_PLUS_URL = `${await listen(halsa)}/halsa-plus/api/v1`;
 
+  // As in server/index.ts: the consent guard, then the API (here a stand-in
+  // for Casper's report route that echoes what reached it), then Hälsa+.
   const app = express();
+  setupHalsaConsentGuard(app);
   app.use('/api', express.json());
+  app.post('/api/app/:patient/report', (req, res) => {
+    reportsReached.push(req.body);
+    res.status(201).json({ reached: true });
+  });
   setupHalsaLink(app);
   mmd = await listen(app);
 });
@@ -283,4 +292,138 @@ test("Andrea's delivered order is stored and shown in the app like any other", a
     view.requests[0].activities.map((a) => a.title),
     ['CGM', 'Sleep', 'Veckorapport'],
   );
+});
+
+// --- 1–7 ratings, overview, vaccinations, consent -------------------------------------
+
+const SR = 'd6b81ca3-5149-46d5-9ba1-582716f263b2';
+
+async function withAndreasRequest() {
+  if (!getServiceRequestRow(SR)) storeDelivery(await andreasPlan(), { channel: 'poll', connectionId: null });
+}
+
+const post = (url: string, body: unknown) =>
+  getJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+test('ratings are 1–7 for every Hälsa+ rating type, as entered', async () => {
+  saveHalsaLink(ANDREA_GUID, ANDREA_TOKEN, 'test');
+  try {
+    for (const [type, value] of [['energy', 1], ['mood', 7], ['stress', 4], ['depression', 2]] as const) {
+      const written = await post(`/api/app/${ANDREA_GUID}/halsa/observations?asOf=${AS_OF}`, { type, value });
+      assert.equal(written.status, 201, type);
+      assert.deepEqual([written.body.points[0].series, written.body.points[0].value, written.body.points[0].unit], [type, value, null]);
+    }
+    for (const value of [0, 8]) assert.equal((await post(`/api/app/${ANDREA_GUID}/halsa/observations`, { type: 'anxiety', value })).status, 400);
+  } finally {
+    removeHalsaLink(ANDREA_GUID);
+  }
+  // In the app: Hälsa+ ratings get the 1–7 scale and the label "Anxiety".
+  const anxiety = halsaReading({ name: 'anxiety', conceptGuid: '739ae368-f0df-4b14-a6bb-98affed01e3d' }, { status: 'loading' })!;
+  assert.deepEqual([anxiety.label, anxiety.rating], ['Anxiety', { min: 1, max: 7, low: 'Not at all', high: 'Very much' }]);
+  assert.deepEqual(halsaReading({ name: 'mood' }, { status: 'loading' })!.rating, { min: 1, max: 7, low: 'Very low', high: 'Very high' });
+});
+
+test('overview: scores, "available/total" and each latest value ready to show', async () => {
+  saveHalsaLink(ANDREA_GUID, ANDREA_TOKEN, 'test');
+  try {
+    const { status, body } = await getJson(`/api/app/${ANDREA_GUID}/halsa/overview?asOf=${AS_OF}`);
+    assert.equal(status, 200);
+    assert.equal(body.demoRanges, true);
+    const byId = Object.fromEntries(body.categories.map((c: { id: string }) => [c.id, c]));
+    for (const id of ['lungs', 'liver', 'urinary-tract']) {
+      assert.deepEqual([byId[id].score, byId[id].available, byId[id].total], [null, 0, 2], id);
+      assert.ok(byId[id].measures.every((m: { latest: unknown; range: unknown }) => m.latest === null && m.range === null));
+    }
+    for (const id of ['hormones', 'heart', 'mental-health']) assert.equal(typeof byId[id].score, 'number', id);
+    assert.deepEqual([byId['mental-health'].available, byId['mental-health'].total], [6, 6]);
+    const mental = Object.fromEntries(byId['mental-health'].measures.map((m: { id: string }) => [m.id, m]));
+    assert.equal(mental.sleep.latest.unit, 'h');
+    assert.equal(mental.sleep.range, '6–9 h');
+    assert.equal(mental.sleep.latest.device, 'Smartwatch (demo)');
+    assert.equal(mental.anxiety.latest.unit, 'of 7');
+    assert.equal(mental.anxiety.range, '1–4');
+    assert.match(byId.heart.measures[0].latest.value, /^\d+\/\d+$/);
+    assert.equal(byId.heart.measures[0].range, '90–130 / 60–85 mmHg');
+    assert.equal(byId.hormones.measures[0].range, '3.9–10 mmol/L');
+    const scores = body.categories.map((c: { score: number | null }) => c.score).filter((s: number | null) => s !== null);
+    assert.equal(body.healthScore, Math.round(scores.reduce((a: number, b: number) => a + b, 0) / scores.length));
+
+    const vaccinations = await getJson(`/api/app/${ANDREA_GUID}/halsa/vaccinations`);
+    assert.equal(vaccinations.status, 200);
+    assert.ok(vaccinations.body.items.length >= 8);
+  } finally {
+    removeHalsaLink(ANDREA_GUID);
+  }
+});
+
+test("the consent card names the plan's data in plain words", async () => {
+  const parsed = await andreasPlan();
+  assert.deepEqual(requestedData(parsed.carePlans[0]), ['CGM glucose', 'sleep', 'blood pressure', 'anxiety', 'stress']);
+});
+
+test('consent: no report reaches MMD for a linked patient until she has agreed; declining stops it again', async () => {
+  await withAndreasRequest();
+  saveHalsaLink(ANDREA_GUID, ANDREA_TOKEN, 'test');
+  const report = { serviceRequestGuid: SR, activityKey: '1-cgm', stopIndex: 0, values: [{ name: 'CGM', value: '10.7' }] };
+  try {
+    const consentUrl = `/api/app/${ANDREA_GUID}/halsa/consent/${SR}`;
+    assert.deepEqual((await getJson(consentUrl)).body, { decision: null, decidedAt: null, history: [] });
+
+    const refused = await post(`/api/app/${ANDREA_GUID}/report`, report);
+    assert.equal(refused.status, 403);
+    assert.equal(refused.body.error, NO_CONSENT_MESSAGE);
+    assert.equal(reportsReached.length, 0);
+
+    const declined = await post(consentUrl, { decision: 'decline' });
+    assert.equal(declined.status, 201);
+    assert.equal(declined.body.decision, 'decline');
+    assert.equal((await post(`/api/app/${ANDREA_GUID}/report`, report)).status, 403);
+
+    const agreed = await post(consentUrl, { decision: 'accept' });
+    assert.deepEqual([agreed.body.decision, agreed.body.history.length], ['accept', 2]);
+    const sent = await post(`/api/app/${ANDREA_GUID}/report`, report);
+    assert.equal(sent.status, 201);
+    assert.deepEqual(reportsReached, [report], 'the body reaches the report route unchanged');
+
+    // She changes her mind: blocked again. Every decision is kept.
+    await post(consentUrl, { decision: 'decline' });
+    assert.equal((await post(`/api/app/${ANDREA_GUID}/report`, report)).status, 403);
+    assert.deepEqual((await getJson(consentUrl)).body.history.map((d: { decision: string }) => d.decision), ['decline', 'accept', 'decline']);
+
+    assert.equal((await post(consentUrl, { decision: 'maybe' })).status, 400);
+    assert.equal((await getJson(`/api/app/${ANDREA_GUID}/halsa/consent/someone-elses-plan`)).status, 404);
+  } finally {
+    removeHalsaLink(ANDREA_GUID);
+    reportsReached.length = 0;
+  }
+});
+
+test('consent: patients without a Hälsa+ link report exactly as before', async () => {
+  const report = { serviceRequestGuid: 'c4e2a9b1-7d3f-4e5a-8b6c-9d0e1f2a3b42', activityKey: 'diabetes:glucose', stopIndex: 0, values: [] };
+  const sent = await post('/api/app/a7d3c1e2-5b4f-4c6a-9e8d-2f1b0c3d4e51/report', report);
+  assert.equal(sent.status, 201);
+  assert.deepEqual(reportsReached, [report]);
+  reportsReached.length = 0;
+  // In the app: no link (404) or nothing to check leaves Send as it was.
+  assert.equal(maySend({ status: 'unlinked' }), true);
+  assert.equal(maySend({ status: 'idle' }), true);
+  assert.equal(maySend({ status: 'ready', data: { decision: null, decidedAt: null, history: [] } }), false);
+  assert.equal(maySend({ status: 'ready', data: { decision: 'decline', decidedAt: AS_OF, history: [] } }), false);
+  assert.equal(maySend({ status: 'ready', data: { decision: 'accept', decidedAt: AS_OF, history: [] } }), true);
+  assert.equal(maySend({ status: 'error', message: 'down' }), false);
+});
+
+test('consent: when Hälsa+ cannot answer, nothing is sent', async () => {
+  saveHalsaLink(ANDREA_GUID, ANDREA_TOKEN, 'test');
+  const url = process.env.HALSA_PLUS_URL;
+  process.env.HALSA_PLUS_URL = 'http://127.0.0.1:9/halsa-plus/api/v1';
+  try {
+    const refused = await post(`/api/app/${ANDREA_GUID}/report`, { serviceRequestGuid: SR, activityKey: '1-cgm', stopIndex: 0, values: [] });
+    assert.equal(refused.status, 502);
+    assert.match(refused.body.error, /nothing was sent/);
+    assert.equal(reportsReached.length, 0);
+  } finally {
+    process.env.HALSA_PLUS_URL = url;
+    removeHalsaLink(ANDREA_GUID);
+  }
 });
