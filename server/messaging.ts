@@ -1,8 +1,10 @@
+import { getSettings } from './settings.ts';
+
 // The chat as FHIR messaging. Every message is a FHIR R5 Communication,
 // delivered as a Bundle of type "message" whose MessageHeader points at it.
 //
-// MMD always keeps the Communication itself. When a CDR is configured
-// (CDR_FHIR_URL), the message Bundle is also sent there, so the chat can feed
+// MMD always keeps the Communication itself. When a CDR is set up in the
+// admin console, the message Bundle is also sent there, so the chat can feed
 // the control tower's search for patients who are not doing well.
 //
 // Note: the PDHC CDR manual lists ten FHIR resource types (Patient,
@@ -65,7 +67,7 @@ export function toMessageBundle(message: ChatMessage) {
         resource: {
           resourceType: 'MessageHeader',
           eventCoding: { system: EVENT_SYSTEM, code: message.sender === 'patient' ? 'patient-message' : 'care-team-message' },
-          source: { name: 'MMD', endpointUrl: process.env.PUBLIC_URL ?? 'https://mmd.example' },
+          source: { name: 'MMD', endpointUrl: getSettings().publicUrl ?? 'https://mmd.example' },
           focus: [{ reference: focus }],
         },
       },
@@ -78,11 +80,11 @@ export type CdrOutcome = { status: 'not-configured' | 'stored' | 'failed'; messa
 
 /** Sends one chat message to the configured CDR as a FHIR message Bundle. */
 export async function sendToCdr(message: ChatMessage): Promise<CdrOutcome> {
-  const base = process.env.CDR_FHIR_URL?.replace(/\/+$/, '');
+  const { cdrUrl: base, cdrSourceService, cdrServiceKey } = getSettings();
   if (!base) return { status: 'not-configured', message: 'No CDR configured; kept in MMD.' };
   const headers: Record<string, string> = { 'Content-Type': 'application/fhir+json', Accept: 'application/fhir+json' };
-  if (process.env.CDR_SOURCE_SERVICE) headers['X-Source-Service'] = process.env.CDR_SOURCE_SERVICE;
-  if (process.env.CDR_SERVICE_KEY) headers['X-Service-Key'] = process.env.CDR_SERVICE_KEY;
+  if (cdrSourceService) headers['X-Source-Service'] = cdrSourceService;
+  if (cdrServiceKey) headers['X-Service-Key'] = cdrServiceKey;
   try {
     const response = await fetch(`${base}/Bundle`, {
       method: 'POST',

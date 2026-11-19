@@ -9,6 +9,7 @@ import { applyPlanTemplates } from './plandefinition.ts';
 import { fetchIpsFromHealthConnect } from './ips.ts';
 import { sendToCdr } from './messaging.ts';
 import { ReportError, reportStop } from './report.ts';
+import { getSettings, saveSettings, SettingsError, toSettingsView } from './settings.ts';
 import {
   activityStops,
   addMessage,
@@ -218,6 +219,21 @@ export function setupApi(app: Express) {
     res.json(toConnectionView(getConnection(connection.id)!));
   });
 
+  // Health Connect, the CDR and this app's address ------------------------------
+
+  app.get('/api/settings', (_req, res) => {
+    res.json(toSettingsView());
+  });
+
+  app.put('/api/settings', (req, res) => {
+    try {
+      res.json(toSettingsView(saveSettings(req.body)));
+    } catch (error) {
+      if (error instanceof SettingsError) return res.status(400).json({ error: error.message });
+      sendError(res, error);
+    }
+  });
+
   app.get('/api/inbound-log', (_req, res) => {
     res.json(listInboundLog());
   });
@@ -299,7 +315,7 @@ export function setupApi(app: Express) {
   /** Step 11: fetch the IPS through Health Connect (never straight from a CDR). */
   app.post('/api/app/:patient/ips/refresh', async (req, res) => {
     if (!getPatientView(req.params.patient)) return res.status(404).json({ error: 'The patient was not found.' });
-    if (!process.env.HEALTH_CONNECT_URL) {
+    if (!getSettings().healthConnectUrl) {
       return res.status(409).json({ error: 'Health Connect is not configured here, so the app shows the synthetic IPS.' });
     }
     try {

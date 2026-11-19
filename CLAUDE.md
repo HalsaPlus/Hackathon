@@ -7,6 +7,7 @@ A patient-engagement web app (React + Vite frontend, Express backend, SQLite via
 - This repository is **public**. Never commit `.env`, tokens, push secrets or the `data/` database.
 - PDHC may only be used with synthetic data. Never put real patient data into PDHC, this app or this repo.
 - Do not copy passwords, keys, internal IP addresses or personal contact details from the PDHC manuals; some manuals contain them.
+- Connection settings (PDHC, Health Connect, the CDR, the app's public address) live in the database and are edited in the admin console, not in environment variables. Only `ADMIN_PASSWORD`, `DATABASE_PATH` and `PORT` stay in the environment, since they are needed before the database can be opened.
 
 ## PDHC reference
 

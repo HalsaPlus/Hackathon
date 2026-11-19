@@ -59,12 +59,23 @@ PDHC delivers requests in two ways, and the app handles both:
 
 Reports from the patient app go to `POST /provider/report/{sr}` on gateway.pdhc, with the PAT and the request's `grant_token`. A demo request stays in demo mode, and the app says so.
 
-## Optional settings
+## Other services
+
+Every connection setting is stored in the database and entered under **Connection** in the admin console, in the card **Other services**. None of it is read from environment variables. Tokens and keys can be replaced or removed, but they are never shown again once saved.
+
+| Setting | What it does |
+| --- | --- |
+| **Health Connect:** URL and token | Fetches the IPS with `GET {url}/Patient/{id}/$summary`, with the token as `Authorization: Bearer`. Without a URL the demo IPS is shown, marked synthetic. |
+| **CDR:** URL, source service and service key | Sends each chat message as a FHIR message Bundle to `{url}/Bundle`, with `X-Source-Service` and `X-Service-Key`. Without a URL the messages are kept in MMD. |
+| **This app:** public address | Written as the sender in the FHIR messages MMD sends. |
+
+## Environment variables
+
+Only what the server needs before it can open the database:
 
 | Variable | What it does |
 | --- | --- |
-| `HEALTH_CONNECT_URL`, `HEALTH_CONNECT_TOKEN` | Fetches the IPS with `GET {url}/Patient/{id}/$summary`. Without them the demo IPS is shown, marked synthetic. |
-| `CDR_FHIR_URL`, `CDR_SOURCE_SERVICE`, `CDR_SERVICE_KEY` | Sends each chat message as a FHIR message Bundle to the CDR. Without them the messages are kept in MMD. |
+| `ADMIN_PASSWORD` | The admin login. Required. |
 | `DATABASE_PATH`, `PORT` | Where the SQLite file lives (default `data/mmd.sqlite`) and the port (default 3001). |
 
 The chat is also available as FHIR for the control tower: `GET /api/fhir/Communication?patient={id}`.
@@ -78,6 +89,7 @@ The chat is also available as FHIR for the control tower: `GET /api/fhir/Communi
   - `report.ts` and `pdhc.ts` report to PDHC.
   - `messaging.ts` turns the chat into FHIR messaging.
   - `ips.ts` reads the IPS.
+  - `settings.ts` stores how to reach Health Connect, the CDR and this app's address.
   - `demo.ts` builds Andrea.
 - **Patient app:** React, in `src/app/`. The screens are in `src/app/screens/`. The style follows Hälsa+ (MyMedicalData).
 - **Admin console:** React, in `src/`.
