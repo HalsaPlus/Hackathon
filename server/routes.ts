@@ -240,7 +240,8 @@ export function setupApi(app: Express) {
     const connection = getConnection(connectionId(req));
     if (!connection) return res.status(404).json({ error: 'The connection does not exist.' });
     try {
-      res.json(await sendTestReports(connection.id));
+      const body = (req.body ?? {}) as { onePerReport?: unknown };
+      res.json(await sendTestReports(connection.id, { onePerReport: body.onePerReport !== false }));
     } catch (error) {
       sendError(res, error);
     }

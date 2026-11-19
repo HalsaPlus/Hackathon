@@ -57,7 +57,8 @@ export const api = {
   deleteConnection: (id: number) => call<void>('DELETE', `/api/connections/${id}`),
   testConnection: (id: number) => call<ConnectionView>('POST', `/api/connections/${id}/test`),
   syncConnection: (id: number) => call<ConnectionView>('POST', `/api/connections/${id}/sync`),
-  sendTestReport: (id: number) => call<TestReportResult[]>('POST', `/api/connections/${id}/test-report`),
+  sendTestReport: (id: number, onePerReport: boolean) =>
+    call<TestReportResult[]>('POST', `/api/connections/${id}/test-report`, { onePerReport }),
   inboundLog: () => call<InboundLogEntry[]>('GET', '/api/inbound-log'),
 
   settings: () => call<ServiceSettingsView>('GET', '/api/settings'),

@@ -20,7 +20,7 @@ const PATIENT = 'p-sync';
 const concept = (code: string, display: string) => ({ concept: { coding: [{ system: 'urn:pdhc:concept', code, display }] } });
 
 /** The FHIR resource as request.pdhc delivered it on 2026-11-19 (ids made up). */
-function fhirResource(sr: string) {
+function fhirResource(sr: string, weekly: [string, string][] = [['c-sys', 'systolic-blood-pressure']]) {
   return {
     resourceType: 'ServiceRequest',
     id: sr,
@@ -38,7 +38,7 @@ function fhirResource(sr: string) {
         instantiatesCanonical: [TEMPLATE_URL],
         activity: [
           { performedActivity: [concept('c-sleep', 'sleep-duration')] },
-          { performedActivity: [concept('c-sys', 'systolic-blood-pressure')] },
+          { performedActivity: weekly.map(([code, display]) => concept(code, display)) },
         ],
       },
     ],
@@ -87,6 +87,21 @@ const liveTemplate = {
   ],
 };
 
+/** What plan.pdhc says about the stress concept: a 1–7 slider, bound to SNOMED CT. */
+const PLAN_PDHC: Record<string, unknown> = {
+  'https://plan.pdhc.se/api/v1/concepts/c-stress': {
+    concept_name: 'stress',
+    concept_display_text: 'Stress',
+    range_low: 1,
+    range_high: 7,
+    response_type_url: 'https://plan.pdhc.se/api/v1/lookup/response-types/slider',
+    canonical_lib_url: 'https://plan.pdhc.se/api/v1/lookup/canonical-libs/snomed',
+    canonical_refnumber: '73595000',
+  },
+  'https://plan.pdhc.se/api/v1/lookup/response-types/slider': { response_type_name: 'Slider' },
+  'https://plan.pdhc.se/api/v1/lookup/canonical-libs/snomed': { canonical_lib_name: 'snomed', canonical_lib_url: 'http://snomed.info/sct' },
+};
+
 const pdhc = {
   feed: [] as { service_request_guid: string; updated_at: string; sr_status: string }[],
   downloads: new Map<string, Record<string, unknown>>(),
@@ -95,15 +110,20 @@ const pdhc = {
   reports: [] as { sr: string; body: any }[],
 };
 
-function download(sr: string, state: { sr_status: string; is_open: boolean }) {
+function download(
+  sr: string,
+  state: { sr_status: string; is_open: boolean },
+  carePlan: Record<string, unknown> = frozenCarePlan,
+  weekly?: [string, string][],
+) {
   return {
-    fhir_resource: fhirResource(sr),
+    fhir_resource: fhirResource(sr, weekly),
     grant_token: `grant-${sr}`,
     patient_guid: PATIENT,
     contract_guid: 'con-1',
     service_request_guid: sr,
-    care_plan_guid: 'cp-1',
-    care_plan: frozenCarePlan,
+    care_plan_guid: String(carePlan.care_plan_guid),
+    care_plan: carePlan,
     ...state,
   };
 }
@@ -125,6 +145,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ action: 'created', is_late: false, observations_stored: body.report_payload.observations.length, receipt_guid: 'rcpt-1', service_request_guid: reported, status: 'accepted' }, 202);
   }
   if (url.startsWith(`${BASE}/provider/feed`)) return json({ items: pdhc.feed, total: pdhc.feed.length });
+  if (PLAN_PDHC[url]) return json(PLAN_PDHC[url]);
   const sr = url.match(/\/provider\/download\/([^/?]+)/)?.[1];
   if (sr) return pdhc.downloads.has(sr) ? json(pdhc.downloads.get(sr)) : json({ code: 'not_found' }, 404);
   if (url.startsWith(TEMPLATE_URL)) return json(liveTemplate);
@@ -201,7 +222,7 @@ test('a request missing from the feed but still open is not downloaded every min
 
 test('sends test observations for open requests, with the frozen transaction GUIDs and a test note', async () => {
   pdhc.reports = [];
-  const results = await sendTestReports(connectionId, () => 0.5);
+  const results = await sendTestReports(connectionId, {}, () => 0.5);
 
   // sr-1 is closed, so nothing goes for it. In sr-2 the sleep line has a stop
   // due; the weekly report has no schedule in its frozen care plan.
@@ -212,7 +233,8 @@ test('sends test observations for open requests, with the frozen transaction GUI
       ['sr-2', 'Veckorapport', 'skipped'],
     ],
   );
-  assert.equal(results[0].message, 'Received by PDHC (receipt rcpt-1).');
+  assert.equal(results[0].message, 'Received by PDHC (receipt rcpt-1, 1 stored).');
+  assert.equal(results[0].sent[0].receiptGuid, 'rcpt-1');
   assert.equal(results[0].values[0].transactionGuid, 'tx-frozen-sleep');
 
   assert.equal(pdhc.reports.length, 1);
@@ -222,7 +244,8 @@ test('sends test observations for open requests, with the frozen transaction GUI
   assert.equal(body.grant_token, 'grant-sr-2');
   const [observation] = body.report_payload.observations;
   assert.equal(observation.transaction_guid, 'tx-frozen-sleep');
-  assert.equal(observation.notes, TEST_NOTE);
+  // The note says it is test data and which parameter the value was meant for.
+  assert.equal(observation.notes, `${TEST_NOTE} sleep-duration = ${observation.value} h`);
   // A JSON number, since the transaction is numeric.
   assert.equal(typeof observation.value, 'number');
   assert.ok(observation.value >= 4.8 && observation.value <= 8.9);
@@ -249,4 +272,96 @@ test('numeric values go to the gateway as numbers, other answers as text', async
   assert.equal(gatewayValue('125', undefined), 125); // type unknown: a plain number is sent as one
   assert.equal(gatewayValue('done', 'numeric'), 'done');
   assert.equal(gatewayValue('7', 'string'), '7');
+});
+
+// A later request whose frozen weekly report has a schedule and four parameters.
+const WEEKLY: [string, string][] = [
+  ['c-sys', 'systolic-blood-pressure'],
+  ['c-dia', 'diastolic-blood-pressure'],
+  ['c-anx', 'anxiety'],
+  ['c-stress', 'stress'],
+];
+const weeklyCarePlan = {
+  ...frozenCarePlan,
+  care_plan_guid: 'cp-2',
+  activities: [
+    frozenCarePlan.activities[0],
+    {
+      ...frozenCarePlan.activities[1],
+      timing_type: 'repeat',
+      timing: { repeat: { count: 8, frequency: 1, period: 1, periodUnit: 'wk' } },
+      transactions: WEEKLY.map(([code, name]) => ({
+        transaction_guid: `tx-${code}`,
+        concept_guid: code,
+        concept_name: name,
+        requirement_type: 'required',
+        response_type: 'numeric',
+      })),
+    },
+  ],
+};
+
+test('one value per report: its own report, its own time, and no two parameters share a value', async () => {
+  pdhc.feed = [{ service_request_guid: 'sr-3', updated_at: '2026-11-19T18:30:00', sr_status: 'active' }];
+  pdhc.downloads.set('sr-3', download('sr-3', { sr_status: 'active', is_open: true }, weeklyCarePlan, WEEKLY));
+  await syncConnection(connectionId);
+
+  pdhc.reports = [];
+  const results = await sendTestReports(connectionId);
+  const weekly = results.find((r) => r.serviceRequestGuid === 'sr-3' && r.activity === 'Veckorapport')!;
+  assert.equal(weekly.status, 'sent');
+  assert.equal(weekly.sent.length, 4);
+  assert.equal(weekly.message, 'Received by PDHC: 4 of 4 reports.');
+
+  const sr3 = pdhc.reports.filter((r) => r.sr === 'sr-3');
+  const weeklyReports = sr3.filter((r) => r.body.report_payload.observations[0].transaction_guid !== 'tx-frozen-sleep');
+  assert.equal(weeklyReports.length, 4);
+  assert.ok(weeklyReports.every((r) => r.body.report_payload.observations.length === 1));
+  const observations = weeklyReports.map((r) => r.body.report_payload.observations[0]);
+  assert.deepEqual(observations.map((o) => o.transaction_guid), ['tx-c-sys', 'tx-c-dia', 'tx-c-anx', 'tx-c-stress']);
+  assert.equal(new Set(observations.map((o) => o.recorded_at)).size, 4);
+  assert.ok(observations.every((o, i) => o.notes === `${TEST_NOTE} ${WEEKLY[i][1]} = ${o.value}`));
+
+  // Stress stays on the concept's own 1–7 scale, in whole numbers (a slider).
+  const stress = observations.find((o) => o.transaction_guid === 'tx-c-stress')!;
+  assert.ok(Number.isInteger(stress.value) && stress.value >= 1 && stress.value <= 7, `stress ${stress.value}`);
+
+  // Every value in the click is different, so a value on the wrong parameter can be traced.
+  const all = pdhc.reports.flatMap((r) => r.body.report_payload.observations.map((o: { value: number }) => o.value));
+  assert.equal(new Set(all).size, all.length);
+});
+
+test('all values of an activity in one report, as the patient app sends them', async () => {
+  pdhc.reports = [];
+  const results = await sendTestReports(connectionId, { onePerReport: false });
+  const weekly = results.find((r) => r.serviceRequestGuid === 'sr-3' && r.activity === 'Veckorapport')!;
+  assert.equal(weekly.sent.length, 1);
+  const report = pdhc.reports.find((r) => r.sr === 'sr-3' && r.body.report_payload.observations.length === 4)!;
+  assert.deepEqual(
+    report.body.report_payload.observations.map((o: { transaction_guid: string }) => o.transaction_guid),
+    ['tx-c-sys', 'tx-c-dia', 'tx-c-anx', 'tx-c-stress'],
+  );
+  assert.equal(new Set(report.body.report_payload.observations.map((o: { recorded_at: string }) => o.recorded_at)).size, 1);
+});
+
+test("test values keep to the concept's own scale and response type on plan.pdhc", async () => {
+  const { conceptInfo } = await import('./concepts.ts');
+  const stress = await conceptInfo('c-stress');
+  assert.deepEqual(stress, {
+    guid: 'c-stress',
+    name: 'stress',
+    rangeLow: 1,
+    rangeHigh: 7,
+    responseType: 'Slider',
+    unit: undefined,
+    term: { system: 'http://snomed.info/sct', code: '73595000', display: 'Stress' },
+  });
+  // 0–10 for a rating, cut to the concept's 1–7.
+  assert.equal(testValue({ name: 'stress' }, () => 0, stress), '1');
+  assert.equal(testValue({ name: 'stress' }, () => 0.999, stress), '7');
+  // Blood pressure as an Integer concept; glucose keeps its decimal.
+  assert.equal(testValue({ name: 'systolic-blood-pressure' }, () => 0.5, { guid: 'x', name: null, rangeLow: 60, rangeHigh: 250, responseType: 'Integer' }), '126');
+  assert.equal(testValue({ name: 'CGM' }, () => 0.5, { guid: 'x', name: null, rangeLow: 2, rangeHigh: 22, responseType: 'numerical' }), '7.1');
+  // A concept that cannot be read leaves the realistic spread alone.
+  assert.equal(await conceptInfo('c-unknown'), undefined);
 });

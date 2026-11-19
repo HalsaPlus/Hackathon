@@ -1,4 +1,5 @@
 import type { ActivityView, TestReportResult, Transaction } from '../shared/types.ts';
+import { type ConceptInfo, conceptInfo } from './concepts.ts';
 import { all } from './db.ts';
 import { reportStop } from './report.ts';
 import { getPatientView } from './store.ts';
@@ -48,10 +49,32 @@ function fromRange(t: Transaction): Rule {
   return { min: 0, max: 10, decimals: 0 };
 }
 
-/** One synthetic value for a transaction. `random` is injectable for tests. */
-export function testValue(t: Transaction, random: () => number = Math.random): string {
-  const rule = RULES.find(([pattern]) => pattern.test(t.name))?.[1] ?? fromRange(t);
-  return (rule.min + random() * (rule.max - rule.min)).toFixed(rule.decimals);
+/** Response types that take whole numbers only. */
+const WHOLE_NUMBERS = /integer|slider|scale|rating|count/i;
+
+/**
+ * One synthetic value for a transaction. The spread is realistic for what is
+ * measured, but never outside the concept's own scale on plan.pdhc (stress is
+ * 1–7 there, not 0–10), and whole numbers when the concept's response type
+ * says so. `random` is injectable for tests.
+ */
+export function testValue(t: Transaction, random: () => number = Math.random, concept?: ConceptInfo): string {
+  const rule = { ...(RULES.find(([pattern]) => pattern.test(t.name))?.[1] ?? fromRange(t)) };
+  const low = concept?.rangeLow;
+  const high = concept?.rangeHigh;
+  if (low !== undefined) rule.min = Math.max(rule.min, low);
+  if (high !== undefined) rule.max = Math.min(rule.max, high);
+  // The realistic spread and the scale do not overlap: use the scale.
+  if (rule.min >= rule.max && low !== undefined && high !== undefined && high > low) {
+    rule.min = low;
+    rule.max = high;
+  }
+  if (concept?.responseType && WHOLE_NUMBERS.test(concept.responseType)) rule.decimals = 0;
+  const value = rule.min + random() * (rule.max - rule.min);
+  // Rounding must not step outside the scale either.
+  const step = 10 ** -rule.decimals;
+  const bounded = Math.min(high ?? Infinity, Math.max(low ?? -Infinity, Math.round(value / step) * step));
+  return bounded.toFixed(rule.decimals);
 }
 
 /**
@@ -66,16 +89,43 @@ function reportableStop(activity: ActivityView) {
   );
 }
 
+export interface TestReportOptions {
+  /**
+   * Send each value in a report of its own, with its own recorded_at (default).
+   * Off: one report per activity with all its values, as the patient app does.
+   */
+  onePerReport?: boolean;
+}
+
+/** The note that travels with each value: says it is test data and which parameter it was meant for. */
+export function testNote(value: { name: string; value: string; unit: string | null }) {
+  return `${TEST_NOTE} ${value.name} = ${value.value}${value.unit ? ` ${value.unit}` : ''}`;
+}
+
 /**
  * Sends one set of test values per activity for every open request that came
  * through this connection. Closed requests and demo requests are left out.
+ * No two parameters get the same value in one click, so a value that shows up
+ * on the wrong parameter at PDHC can be traced.
  */
-export async function sendTestReports(connectionId: number, random: () => number = Math.random): Promise<TestReportResult[]> {
+export async function sendTestReports(
+  connectionId: number,
+  options: TestReportOptions = {},
+  random: () => number = Math.random,
+): Promise<TestReportResult[]> {
+  const onePerReport = options.onePerReport ?? true;
   const rows = all<{ guid: string; patient_guid: string }>(
     "SELECT guid, patient_guid FROM service_requests WHERE connection_id = :connectionId AND source <> 'demo' ORDER BY received_at",
     { connectionId },
   );
   const results: TestReportResult[] = [];
+  const used = new Set<string>();
+  const distinctValue = (t: Transaction, concept?: ConceptInfo) => {
+    let value = testValue(t, random, concept);
+    for (let attempt = 0; attempt < 20 && used.has(value); attempt += 1) value = testValue(t, random, concept);
+    used.add(value);
+    return value;
+  };
 
   for (const row of rows) {
     const view = getPatientView(row.patient_guid);
@@ -91,7 +141,7 @@ export async function sendTestReports(connectionId: number, random: () => number
       };
       const stop = reportableStop(activity);
       const skip = (message: string) =>
-        results.push({ ...base, stopIndex: null, stopDueAt: null, values: [], status: 'skipped', message });
+        results.push({ ...base, stopIndex: null, stopDueAt: null, values: [], status: 'skipped', message, sent: [] });
       if (!activity.transactions.length) {
         skip('Nothing to measure in this activity.');
         continue;
@@ -101,15 +151,15 @@ export async function sendTestReports(connectionId: number, random: () => number
         continue;
       }
 
-      const values = activity.transactions.map((t) => ({ name: t.name, value: testValue(t, random) }));
+      // Each concept's own scale and response type from plan.pdhc; without them the realistic spread alone.
+      const concepts = await Promise.all(activity.transactions.map((t) => conceptInfo(t.conceptGuid)));
+      const values = activity.transactions.map((t, i) => ({ name: t.name, value: distinctValue(t, concepts[i]) }));
       try {
-        const result = await reportStop(row.patient_guid, {
-          serviceRequestGuid: request.guid,
-          activityKey: activity.key,
-          stopIndex: stop.index,
-          values,
-          note: TEST_NOTE,
-        });
+        const result = await reportStop(
+          row.patient_guid,
+          { serviceRequestGuid: request.guid, activityKey: activity.key, stopIndex: stop.index, values, note: TEST_NOTE },
+          { onePerReport, noteFor: testNote },
+        );
         results.push({
           ...base,
           stopIndex: stop.index,
@@ -122,6 +172,7 @@ export async function sendTestReports(connectionId: number, random: () => number
           })),
           status: result.reportStatus,
           message: result.reportMessage,
+          sent: result.sent ?? [],
         });
       } catch (error) {
         results.push({
@@ -131,6 +182,7 @@ export async function sendTestReports(connectionId: number, random: () => number
           values: [],
           status: 'failed',
           message: error instanceof Error ? error.message : 'Reporting failed.',
+          sent: [],
         });
       }
     }
