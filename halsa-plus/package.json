@@ -1,7 +1,7 @@
 {
   "name": "halsa-plus-demo-api",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Simulerad Hälsa+-backend för Nordic Hackathon 2026 – bara syntetiska data",
   "type": "module",
   "engines": {
@@ -11,7 +11,10 @@
     "dev": "node --watch-path=src src/index.ts",
     "start": "node src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/*.test.ts"
+    "test": "node --test src/*.test.ts",
+    "patient:create": "node scripts/patient-create.ts",
+    "token:create": "node scripts/token-create.ts",
+    "examples": "node scripts/write-examples.ts"
   },
   "dependencies": {
     "express": "^5.3.0"

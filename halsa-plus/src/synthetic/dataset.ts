@@ -50,17 +50,27 @@ export interface Device {
   since: string;
 }
 
-// Ids as in the Hälsa+ demo (uuidV5 of "user:<pnr>" and "device:<type>").
-export const PATIENT_ID = 'f6c71a10-5400-55e9-bc8b-6fad33bb96e8';
-export const HEIGHT_CM = 168;
-export const DEVICES: Device[] = [
+/** Andrea Lindqvist (synthetic). Her guid is the same as her patient GUID in PDHC. */
+export const ANDREA = {
+  guid: '28a29239-6424-48e7-a123-9d9e863670b8',
+  name: 'Andrea Lindqvist',
+  personalIdentityNumber: '200207252388',
+  birthDate: '2002-07-25',
+  identifierSystem: 'urn:oid:1.2.752.129.2.1.3.1',
+  gender: 'female',
+  heightCm: 168,
+};
+export const HEIGHT_CM = ANDREA.heightCm;
+
+// Device ids as in the Hälsa+ demo (uuidV5 of "device:<type>").
+export const ANDREA_DEVICES: Device[] = [
   { id: '6f9f647e-3f38-5bb4-a897-75ebf3d250b7', type: 'cgm-sensor', name: 'CGM sensor (demo)', source: 'bluetooth', types: ['glucose'], since: '2019-05-20' },
   { id: '487a0ac7-adec-5ab4-9a07-451e80585c1e', type: 'blood-pressure-monitor', name: 'Blood pressure monitor (demo)', source: 'bluetooth', types: ['blood-pressure'], since: '2026-03-01' },
   { id: '506bfdb7-f834-57d6-8631-9b8ba5a24897', type: 'scale', name: 'Scale (demo)', source: 'bluetooth', types: ['bmi'], since: '2026-03-01' },
   { id: '9aadb89f-7c71-5a8a-bb38-f32fceb26615', type: 'smartwatch', name: 'Smartwatch (demo)', source: 'bluetooth', types: ['sleep'], since: '2026-03-01' },
-  { id: '6416ebbc-5cba-5d4d-875b-381123d451ea', type: 'app', name: 'Hälsa+ app', source: 'manual-entry', types: ['anxiety', 'stress'], since: '2026-03-01' },
+  { id: '6416ebbc-5cba-5d4d-875b-381123d451ea', type: 'app', name: 'Hälsa+ app', source: 'manual-entry', types: ['anxiety', 'stress', 'blood-pressure', 'glucose', 'bmi', 'sleep'], since: '2026-03-01' },
 ];
-const [CGM, BP, SCALE, WATCH, APP] = DEVICES.map((d) => d.id);
+const [CGM, BP, SCALE, WATCH, APP] = ANDREA_DEVICES.map((d) => d.id);
 
 /** ISO time without milliseconds, as the API writes it. */
 export const isoTime = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -72,11 +82,15 @@ export interface Dataset {
   entries: Entry[];
 }
 
-/** Builds the data for a server that starts on `startDate` (Paris date, YYYY-MM-DD). */
-export function buildDataset(startDate: string): Dataset {
-  const start = Date.parse(HISTORY.start);
+/** The data window for a server that starts on `startDate` (Paris date): 2026-03-01 to 28 days later. */
+export function dataWindow(startDate: string) {
   const lastDate = addDays(startDate, 28);
-  const end = parisTime(addDays(lastDate, 1), 0) - 1;
+  return { start: Date.parse(HISTORY.start), end: parisTime(addDays(lastDate, 1), 0) - 1, lastDate };
+}
+
+/** Builds Andrea's generated data for a server that starts on `startDate` (Paris date, YYYY-MM-DD). */
+export function buildDataset(startDate: string): Dataset {
+  const { start, end, lastDate } = dataWindow(startDate);
 
   const history = generateHistory();
   const extension = generateExtension(end, history.glucose.at(-1)!.value);

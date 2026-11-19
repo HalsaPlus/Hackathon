@@ -8,12 +8,14 @@ import { writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { createApp } from '../src/app.ts';
+import { openDatabase } from '../src/db.ts';
 
 const NOW = Date.parse('2026-11-19T12:00:00Z');
-const TOKEN = 'examples';
+const TOKEN = 'examples-token-not-a-secret';
 const out = path.resolve(import.meta.dirname, '..', 'examples');
 
-const app = createApp({ token: TOKEN, corsOrigins: [], now: () => NOW, startDate: '2026-11-19' });
+const database = openDatabase(':memory:');
+const app = createApp({ database, andreaToken: TOKEN, corsOrigins: [], now: () => NOW, startDate: '2026-11-19' });
 const server = app.listen(0);
 await new Promise((resolve) => server.once('listening', resolve));
 const base = `http://localhost:${(server.address() as AddressInfo).port}`;
@@ -38,9 +40,32 @@ const examples: [string, string][] = [
   ['error-400.json', '/api/v1/observations?asOf=2027-01-01T00:00:00Z'],
 ];
 
+const write = (file: string, data: unknown) => writeFileSync(path.join(out, file), JSON.stringify(data, null, 2) + '\n');
+
 for (const [file, url] of examples) {
   const res = await fetch(base + url, { headers: { Authorization: `Bearer ${TOKEN}` } });
-  writeFileSync(path.join(out, file), JSON.stringify(await res.json(), null, 2) + '\n');
+  write(file, await res.json());
   console.log(res.status, file);
 }
+
+// Writes: a value Andrea enters herself, and a consent decision (request and response).
+const posts: [string, string, unknown][] = [
+  ['observation-post', '/api/v1/observations', { type: 'anxiety', value: 4, effectiveDateTime: '2026-11-19T11:30:00Z' }],
+  ['observation-post-blood-pressure', '/api/v1/observations', {
+    type: 'blood-pressure',
+    effectiveDateTime: '2026-11-19T07:15:00Z',
+    components: [{ code: 'systolic', value: 118 }, { code: 'diastolic', value: 76 }, { code: 'pulse', value: 64 }],
+  }],
+  ['consent-post', '/api/v1/requests/sr-9b8a7c6d/consent', { decision: 'accept' }],
+];
+for (const [name, url, body] of posts) {
+  const res = await fetch(base + url, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  write(`${name}-request.json`, body);
+  write(`${name}-response.json`, await res.json());
+  console.log(res.status, name);
+}
+const history = await fetch(`${base}/api/v1/requests/sr-9b8a7c6d/consent`, { headers: { Authorization: `Bearer ${TOKEN}` } });
+write('consent-history.json', await history.json());
+console.log(history.status, 'consent-history.json');
 server.close();
+database.close();

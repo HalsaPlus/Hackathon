@@ -4,5 +4,7 @@ node_modules
 !.env.example
 *.sqlite
 *.sqlite-*
+# The database folder (anchored, so it cannot match a source folder).
+/.data/
 /data/
 *.log

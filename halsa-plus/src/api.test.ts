@@ -2,20 +2,26 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import { createApp } from './app.ts';
+import { openDatabase } from './db.ts';
 
 // SYNTHETIC TEST DATA ONLY. The server's real clock is fixed to 2026-11-19 12:00Z.
+// TOKEN is Andrea's (HALSA_ANDREA_TOKEN); other patients are tested in patients.test.ts.
 
-const TOKEN = 'test-token-123';
+const TOKEN = 'test-token-andrea-0123456789';
 const NOW = Date.parse('2026-11-19T12:00:00Z');
 let base = '';
 let close: () => void;
 
 before(async () => {
-  const app = createApp({ token: TOKEN, corsOrigins: ['http://gui.test'], now: () => NOW, startDate: '2026-11-19' });
+  const database = openDatabase(':memory:');
+  const app = createApp({ database, andreaToken: TOKEN, corsOrigins: ['http://gui.test'], now: () => NOW, startDate: '2026-11-19' });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://localhost:${(server.address() as AddressInfo).port}`;
-  close = () => server.close();
+  close = () => {
+    server.close();
+    database.close();
+  };
 });
 after(() => close());
 
@@ -38,9 +44,10 @@ test('health needs no token; everything else does', async () => {
 
 test('me: Andrea with her personal identity number, marked synthetic', async () => {
   const me = await json('/api/v1/me');
+  assert.equal(me.id, '28a29239-6424-48e7-a123-9d9e863670b8', 'the same guid as her patient in PDHC');
   assert.equal(me.name.text, 'Andrea Lindqvist');
   assert.equal(me.birthDate, '2002-07-25');
-  assert.deepEqual(me.identifier, [{ system: 'urn:oid:1.2.752.129.2.1.3.1', value: '200207252388' }]);
+  assert.deepEqual(me.identifier, [{ system: 'urn:oid:1.2.752.129.2.1.3.1', value: '200207252388', display: '20020725-2388' }]);
   assert.equal(me.synthetic, true);
 });
 
@@ -150,7 +157,9 @@ test('requests are an empty placeholder; consent validates the decision', async 
   const post = (body: unknown) =>
     fetch(`${base}/api/v1/requests/x/consent`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   assert.equal((await post({ decision: 'maybe' })).status, 400);
-  assert.equal((await post({ decision: 'accept' })).status, 404);
+  const accepted = await post({ decision: 'accept' });
+  assert.equal(accepted.status, 201);
+  assert.equal(((await accepted.json()) as Body).status, 'accepted');
 });
 
 test('CORS only for the configured origins, and preflight works without a token', async () => {

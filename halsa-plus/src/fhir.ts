@@ -3,12 +3,19 @@
 // sleep night use Hälsa+'s own demo codes; the ratings are not a validated
 // instrument. No interpretation and no reference ranges, as everywhere.
 
-import { DEVICES, PATIENT_ID, type Component, type StoredObservation } from './synthetic/dataset.ts';
+import type { PatientRow } from './patients.ts';
+import type { DeviceDbRow } from './store.ts';
+import type { Component, StoredObservation } from './synthetic/dataset.ts';
+
+/** Who the observations belong to, and her devices (for references with a display name). */
+export interface FhirContext {
+  patient: PatientRow;
+  devices: DeviceDbRow[];
+}
 
 const LOINC = 'http://loinc.org';
 export const LOCAL = 'https://halsaplus.example/codes';
 const UCUM = 'http://unitsofmeasure.org';
-const PNR = { system: 'urn:oid:1.2.752.129.2.1.3.1', value: '200207252388' };
 
 const UCUM_CODES: Record<string, string> = { mmHg: 'mm[Hg]', 'kg/m²': 'kg/m2', count: '{count}' };
 
@@ -40,9 +47,12 @@ const COMPONENT_CODES: Record<Component['code'], ReturnType<typeof coding>> = {
   awakenings: coding(LOCAL, 'awakenings', 'Number of awakenings'),
 };
 
-export function toFhirObservation(o: StoredObservation & { status: string }) {
+export function toFhirObservation(o: StoredObservation & { status: string }, ctx: FhirContext) {
   const { category: cat, code } = CODES[o.type];
-  const device = DEVICES.find((d) => d.id === o.deviceId);
+  const device = ctx.devices.find((d) => d.id === o.deviceId);
+  const { patient } = ctx;
+  const identifier =
+    patient.personal_identity_number && patient.identifier_system ? { identifier: { system: patient.identifier_system, value: patient.personal_identity_number } } : {};
   const rating = o.type === 'anxiety' || o.type === 'stress';
   return {
     resourceType: 'Observation',
@@ -50,7 +60,7 @@ export function toFhirObservation(o: StoredObservation & { status: string }) {
     status: o.status,
     category: category(cat),
     code,
-    subject: { reference: `Patient/${PATIENT_ID}`, identifier: PNR, display: 'Andrea Lindqvist' },
+    subject: { reference: `Patient/${patient.guid}`, ...identifier, display: patient.name },
     ...(o.effectiveDateTime ? { effectiveDateTime: o.effectiveDateTime } : {}),
     ...(o.effectivePeriod ? { effectivePeriod: o.effectivePeriod } : {}),
     ...(o.issued ? { issued: o.issued } : {}),
@@ -64,12 +74,12 @@ export function toFhirObservation(o: StoredObservation & { status: string }) {
   };
 }
 
-export function toFhirBundle(observations: (StoredObservation & { status: string })[], selfUrl: string, nextUrl: string | null) {
+export function toFhirBundle(observations: (StoredObservation & { status: string })[], ctx: FhirContext, selfUrl: string, nextUrl: string | null) {
   return {
     resourceType: 'Bundle',
     type: 'searchset',
     meta: { tag: [{ system: LOCAL, code: 'synthetic', display: 'Synthetic test data' }] },
     link: [{ relation: 'self', url: selfUrl }, ...(nextUrl ? [{ relation: 'next', url: nextUrl }] : [])],
-    entry: observations.map((o) => ({ fullUrl: `https://halsaplus.example/fhir/Observation/${o.id}`, resource: toFhirObservation(o), search: { mode: 'match' } })),
+    entry: observations.map((o) => ({ fullUrl: `https://halsaplus.example/fhir/Observation/${o.id}`, resource: toFhirObservation(o, ctx), search: { mode: 'match' } })),
   };
 }

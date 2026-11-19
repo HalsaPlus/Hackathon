@@ -2,12 +2,16 @@
 
 > **Bara syntetiska testdata.** Andrea Lindqvist är en påhittad patient i Nordic Hackathon 2026-scenariot. Ingen verklig person beskrivs.
 
-En liten backend som låtsas vara Hälsa+, patientappen. Den har en patient, Andrea, med:
+En liten backend som låtsas vara Hälsa+, patientappen. Data sparas i SQLite. Just nu finns en patient, Andrea, men fler kan läggas till utan kodändringar. Andrea har:
 - hennes egna mätvärden från flera enheter;
 - hennes självskattningar i appen;
 - CRP-svar från ett externt labb som hon går till på eget initiativ (påhittat för demon).
 
 GUI:t anropar API:t. MMD och vården får samma data som FHIR.
+
+API:t går att köra på två sätt:
+- **Monterat i MMD-tjänsten** under `/halsa-plus`, till exempel `http://localhost:3001/halsa-plus/api/v1/health`. Caspers `server/index.ts` monterar det före admininloggningen, eftersom Hälsa+ har sin egen inloggning med token.
+- **Fristående** på port 3002 (`npm run dev` i `halsa-plus/`).
 
 - **Kontrakt:** [`openapi.yaml`](openapi.yaml) (OpenAPI 3.1).
 - **Exempelsvar:** [`examples/`](examples/). De skapas ur API:ets riktiga svar med `node scripts/write-examples.ts`, med serverns klocka satt till 2026-11-19 12:00 UTC.
@@ -19,7 +23,7 @@ Kräver Node 24.
 ```bash
 cd halsa-plus
 npm install
-cp .env.example .env   # sätt HALSA_API_TOKEN
+cp .env.example .env   # sätt HALSA_ANDREA_TOKEN till ett långt slumpat värde
 npm run dev
 ```
 
@@ -37,16 +41,45 @@ curl -H "Authorization: Bearer <token>" "http://localhost:3002/api/v1/observatio
 | `npm start` | Startar servern (det Render kör) |
 | `npm test` | Tester för data och API |
 | `npx tsc --noEmit` | Typkontroll |
-| `node scripts/write-examples.ts` | Skapar exemplen i `examples/` på nytt |
+| `npm run patient:create -- --name "…" --pnr <12 siffror> --birth-date <ÅÅÅÅ-MM-DD>` | Lägger till en patient (bara syntetiska data). Skriver ut patientens guid. |
+| `npm run token:create -- --patient <guid> --label <text>` | Skapar en token för en patient och skriver ut den **en gång**. Bara en hash sparas. |
+| `npm run examples` | Skapar exemplen i `examples/` på nytt |
 
 ## Miljövariabler
 
 | Variabel | Krävs | Vad |
 | --- | --- | --- |
-| `HALSA_API_TOKEN` | ja | Bearer-token för alla anrop utom `/api/v1/health`. Utan den svarar API:t `503`. |
-| `CORS_ORIGINS` | för webbläsare | Tillåtna origins, kommaseparerade, till exempel `http://localhost:3001,https://<gui>.onrender.com`. `*` tillåter alla. |
+| `HALSA_DATABASE_PATH` | nej | SQLite-filen. Standard: `halsa-plus/.data/halsa-plus.sqlite` (git-ignorerad). På Render: `/var/data/halsa-plus.sqlite`. |
+| `HALSA_ANDREA_TOKEN` | nej | Om den är satt, ser servern till att det finns en token med just det värdet för Andrea. Bara en hash sparas, och värdet loggas aldrig. Minst 16 tecken. Används på Render, där det inte finns något skal. |
+| `HALSA_CORS_ORIGINS` | för webbläsare från en annan origin | Tillåtna origins, kommaseparerade. `*` tillåter alla. Behövs inte när GUI:t serveras av MMD-tjänsten. |
 | `DEMO_NOW` | nej | Standardvärde för demoklockan (`asOf`), ISO 8601. Utan den används verklig tid. |
-| `PORT` | nej | Port, standard 3002. Render sätter den själv. |
+| `PORT` | nej | Port när API:t körs fristående, standard 3002. |
+
+När API:t är monterat i MMD läses variablerna från MMD-tjänstens miljö eller från rotens `.env`.
+
+## Inloggning: en token per patient
+
+- `Authorization: Bearer <token>` talar om **vilken patient** som anropar. `/me`, `/devices`, `/observations`, `/requests` och samtycke ger och ändrar bara den patientens data.
+- Det finns ingen gemensam token och ingen admin-token. Den tidigare `HALSA_API_TOKEN` är borttagen.
+- Bara en SHA-256-hash av varje token sparas (tabellen `patient_tokens`). En token jämförs i konstant tid och visas bara en gång, när den skapas.
+- **Andrea:** sätt `HALSA_ANDREA_TOKEN`, eller kör `npm run token:create -- --patient 28a29239-6424-48e7-a123-9d9e863670b8 --label "Caspers GUI"`.
+- **Fler patienter:** först `npm run patient:create`, sedan `npm run token:create`. Ingen kodändring behövs.
+- **Spärra en token:** sätt `revoked_at` på raden i `patient_tokens`.
+
+## Databasen
+
+SQLite via `node:sqlite`, i samma stil som MMD:s `server/db.ts` (se [`src/db.ts`](src/db.ts)).
+
+| Tabell | Innehåll |
+| --- | --- |
+| `patients` | guid, namn, personnummer, födelsedatum, identifierarsystem, kön och längd |
+| `patient_tokens` | patient, token-hash, etikett, skapad och spärrad |
+| `devices` | patientens enheter och Hälsa+-appen |
+| `observations` | alla mätvärden. `source` är `generated`, `patient-entered` eller `external-lab`. |
+| `consent_decisions` | varje samtyckesbeslut. Tabellen fylls bara på; triggers stoppar ändringar och radering. |
+| `seed_state` | hur långt den genererade datan är inläst |
+
+**Andrea läses in vid första start**, med guid `28a29239-6424-48e7-a123-9d9e863670b8` (samma som hennes patient-GUID i PDHC), personnummer `200207252388` (visas som `20020725-2388`) och födelsedatum 2002-07-25. Hennes genererade data läses in idempotent: samma id och samma värden varje gång. En omstart lägger bara till de nya dagarna i fönstret, och det hon själv har matat in rörs aldrig.
 
 ## API i korthet
 
@@ -57,7 +90,10 @@ curl -H "Authorization: Bearer <token>" "http://localhost:3002/api/v1/observatio
 | `GET /api/v1/devices` | Enheterna och appen, med senaste synk (≤ `asOf`) |
 | `GET /api/v1/observations` | Tidsserier, äldst först. Filter: `type`, `from`, `to`, `device`, `asOf`, `limit` (högst 5000) och `cursor`. `format=fhir` ger en FHIR R4-Bundle. |
 | `GET /api/v1/observations/latest` | Senaste värdet per typ |
-| `GET /api/v1/requests`, `POST /api/v1/requests/{id}/consent` | Platshållare för nästa steg. Listan är tom, och samtycke ger `404`. |
+| `POST /api/v1/observations` | Patienten matar in ett värde: `anxiety`, `stress`, `glucose`, `blood-pressure`, `bmi` (vikt) eller `sleep`. Värdet sparas. |
+| `GET /api/v1/requests` | Förfrågningar från vården. Platshållare, listan är tom. |
+| `POST /api/v1/requests/{id}/consent` | Godkänn eller avböj (`accept`/`decline`). Beslutet sparas, och det senaste gäller. |
+| `GET /api/v1/requests/{id}/consent` | Alla beslut för en förfrågan, äldst först |
 
 **Typer:** `blood-pressure`, `glucose`, `sleep`, `anxiety`, `stress`, `bmi` och `crp`.
 
@@ -74,7 +110,7 @@ curl -H "Authorization: Bearer <token>" "http://localhost:3002/api/v1/observatio
 
 ## Datan
 
-Allt är **deterministiskt**. Samma dag får samma värden vid varje omstart.
+Den genererade datan är **deterministisk**. Samma dag får samma värden vid varje omstart.
 
 | Typ | Enhet (källa) | Ursprung |
 | --- | --- | --- |
@@ -105,7 +141,17 @@ Allt är **deterministiskt**. Samma dag får samma värden vid varje omstart.
 
 ## Render
 
-Skapa en egen **Web Service** från repot `HalsaPlus/Hackathon`:
+**I MMD-tjänsten (det vi använder).** Hälsa+ följer med MMD-tjänsten, som redan har en disk på `/var/data`. Sätt dessa miljövariabler på MMD-tjänsten:
+
+| Variabel | Värde |
+| --- | --- |
+| `HALSA_DATABASE_PATH` | `/var/data/halsa-plus.sqlite` |
+| `HALSA_ANDREA_TOKEN` | ett långt slumpat värde (hemligt). Ge det till GUI:t. |
+| `DEMO_NOW` | eventuellt |
+
+API:t svarar då på `https://<mmd-tjänsten>/halsa-plus/api/v1/…`. Fler token kan skapas i tjänstens Shell med `cd halsa-plus && npm run token:create -- …`.
+
+**Fristående (valfritt).** Skapa en egen Web Service:
 
 | Inställning | Värde |
 | --- | --- |
@@ -115,6 +161,7 @@ Skapa en egen **Web Service** från repot `HalsaPlus/Hackathon`:
 | Start Command | `npm start` |
 | Region | Frankfurt (EU Central) |
 | Health Check Path | `/api/v1/health` |
-| Environment | `HALSA_API_TOKEN` (hemligt), `CORS_ORIGINS` (GUI:ts adress), eventuellt `DEMO_NOW` |
+| Disk | monterad på `/var/data`, med `HALSA_DATABASE_PATH=/var/data/halsa-plus.sqlite` |
+| Environment | `HALSA_ANDREA_TOKEN` (hemligt), `HALSA_CORS_ORIGINS` (GUI:ts adress), eventuellt `DEMO_NOW` |
 
-Servern behöver ingen disk. Datan skapas i minnet vid start, på under en sekund. På Renders gratisnivå somnar tjänsten efter en stund utan anrop, och då tar första anropet längre tid. Väck den före demon.
+Utan disk försvinner det som matats in och alla samtyckesbeslut vid varje omstart. Andreas genererade data läses då in på nytt.

@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Hälsa+ demo API (simulated)
-  version: 0.1.0
-  summary: A simulated Hälsa+ backend with one synthetic patient, Andrea Lindqvist.
+  version: 0.2.0
+  summary: A simulated Hälsa+ backend. One synthetic patient for now, Andrea Lindqvist; more can be added.
   description: |
     **ALL DATA IS SYNTHETIC TEST DATA.** Andrea Lindqvist is a fictional patient from the
     Nordic Hackathon 2026 scenario. No real person is described.
@@ -40,19 +40,32 @@ info:
 
     Every list response repeats the `asOf` it used.
 
-    ## Auth and CORS
-    - Every endpoint except `/api/v1/health` needs `Authorization: Bearer <token>`. The token
-      is the value of the env variable `HALSA_API_TOKEN`. If the server has no token set,
-      those endpoints answer `503 token_not_configured`.
-    - Browsers may call the API from the origins listed in the env variable `CORS_ORIGINS`
-      (comma-separated).
+    ## Auth: one token per patient
+    - Every endpoint except `/api/v1/health` needs `Authorization: Bearer <token>`.
+    - **The token identifies the patient.** `/me`, `/devices`, `/observations`, `/requests`
+      and the consent endpoints only ever return or change that patient's data. There is no
+      shared or admin token.
+    - The server stores only a SHA-256 hash of each token. A token is shown once when it is
+      created (`npm run token:create`). Andrea's token can also be set with the env variable
+      `HALSA_ANDREA_TOKEN`.
+    - Browsers may call the API from the origins listed in the env variable
+      `HALSA_CORS_ORIGINS` (comma-separated). Not needed when the GUI is served by the MMD
+      service (same origin).
+
+    ## Storage
+    SQLite. Andrea and her generated data are loaded on first start; values she enters
+    (`POST /observations`) and consent decisions are kept across restarts.
 
     ## Units
     The JSON responses carry display units (`mmHg`, `mmol/L`, `kg/m²`). The FHIR format
     (`format=fhir`) carries UCUM codes (`mm[Hg]`, `mmol/L`, `kg/m2`).
 servers:
+  - url: /halsa-plus
+    description: Mounted in the MMD service (same host as the MMD app)
+  - url: http://localhost:3001/halsa-plus
+    description: Local, inside the MMD dev server (npm run dev in the repo root)
   - url: http://localhost:3002
-    description: Local (npm run dev)
+    description: Local, on its own (npm run dev in halsa-plus/)
 security:
   - bearerAuth: []
 tags:
@@ -60,7 +73,7 @@ tags:
   - name: patient
   - name: observations
   - name: requests
-    description: Placeholder for the next step. Care-plan requests from MMD/PDHC and the patient's consent.
+    description: Care-plan requests from MMD/PDHC (the list is a placeholder) and the patient's consent decisions (stored).
 paths:
   /api/v1/health:
     get:
@@ -181,6 +194,45 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+    post:
+      tags: [observations]
+      operationId: createObservation
+      summary: The patient enters a value herself
+      description: |
+        The value is stored, gets `sourceType: patient-reported` and the
+        patient's Hälsa+ app as `deviceId`, and is returned by the GET endpoints from then on.
+
+        Types: `anxiety`, `stress` (integer 0–10), `glucose` (mmol/L), `blood-pressure`
+        (components `systolic`, `diastolic`, optional `pulse`), `bmi` (component `weight` in
+        kg; BMI is calculated with the height in the profile) and `sleep` (`effectivePeriod`,
+        component `sleep-duration` in minutes, optional `awakenings`). `crp` cannot be entered;
+        it comes only from a lab.
+
+        The time defaults to the demo clock (`asOf`, `DEMO_NOW` or the real time) and may not
+        be later than it. The input limits only catch typing errors; they say nothing about
+        the value.
+      parameters:
+        - $ref: '#/components/parameters/asOf'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ObservationInput' }
+            examples:
+              anxiety: { externalValue: examples/observation-post-request.json }
+              blood-pressure: { externalValue: examples/observation-post-blood-pressure-request.json }
+      responses:
+        '201':
+          description: Stored. The observation as the GET endpoints return it.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Observation' }
+              examples:
+                anxiety: { externalValue: examples/observation-post-response.json }
+                blood-pressure: { externalValue: examples/observation-post-blood-pressure-response.json }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /api/v1/observations/latest:
     get:
       tags: [observations]
@@ -223,37 +275,67 @@ paths:
     post:
       tags: [requests]
       operationId: decideConsent
-      summary: Andrea accepts or declines a request (placeholder)
-      description: Gives `404` until requests exist. Every decision will be logged, and a new decision does not overwrite an earlier one.
+      summary: The patient accepts or declines a request
+      description: |
+        Stores the decision in an append-only log: nothing is ever changed or deleted, and a new
+        decision is added after the earlier ones. The latest decision applies. `id` is the
+        request's id from MMD/PDHC (letters, digits and `._:-`, at most 200 characters); the
+        request itself lives in MMD.
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string }
+        - $ref: '#/components/parameters/requestId'
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/ConsentInput' }
-            example: { decision: accept }
+            examples:
+              accept: { externalValue: examples/consent-post-request.json }
       responses:
-        '200':
-          description: The decision is recorded.
+        '201':
+          description: The decision is stored.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ConsentDecision' }
+              examples:
+                accepted: { externalValue: examples/consent-post-response.json }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
+    get:
+      tags: [requests]
+      operationId: consentHistory
+      summary: The patient's decisions for a request, oldest first
+      parameters:
+        - $ref: '#/components/parameters/requestId'
+      responses:
+        '200':
+          description: Every decision for this request, oldest first. The last one applies. Empty if there is none.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConsentDecision' }
+              examples:
+                history: { externalValue: examples/consent-history.json }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
-      description: The value of the env variable HALSA_API_TOKEN.
+      description: A patient's token. It identifies the patient; see "Auth" above.
 
   parameters:
+    requestId:
+      name: id
+      in: path
+      required: true
+      description: The request's id from MMD/PDHC.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{1,200}$' }
     asOf:
       name: asOf
       in: query
@@ -265,7 +347,10 @@ components:
 
   responses:
     BadRequest:
-      description: A parameter is invalid, for example `asof_out_of_range`, `invalid_type` or `invalid_cursor`.
+      description: |
+        A parameter or the body is invalid. Codes: `asof_out_of_range`, `invalid_parameter`,
+        `invalid_type`, `invalid_cursor`, `invalid_body`, and for POST /observations also
+        `invalid_value`, `invalid_time` and `height_missing`.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -293,9 +378,9 @@ components:
 
     Profile:
       type: object
-      required: [id, name, birthDate, identifier, synthetic]
+      required: [id, name, identifier, synthetic]
       properties:
-        id: { type: string, description: Stable id of Andrea's Hälsa+ account. }
+        id: { type: string, description: "The patient's guid. Andrea's is the same as her patient GUID in PDHC (28a29239-6424-48e7-a123-9d9e863670b8)." }
         name:
           type: object
           required: [given, family, text]
@@ -320,6 +405,7 @@ components:
       properties:
         system: { type: string, example: 'urn:oid:1.2.752.129.2.1.3.1' }
         value: { type: string, example: '200207252388' }
+        display: { type: string, example: '20020725-2388', description: The way the number is usually written. }
 
     DeviceList:
       type: object
@@ -421,6 +507,31 @@ components:
         components:
           type: array
           items: { $ref: '#/components/schemas/Component' }
+
+    ObservationInput:
+      type: object
+      description: What the patient enters. Which fields are needed depends on `type` (see POST /api/v1/observations).
+      required: [type]
+      properties:
+        type: { type: string, enum: [anxiety, stress, glucose, blood-pressure, bmi, sleep] }
+        effectiveDateTime: { type: string, format: date-time, description: Default the demo clock. Not for `sleep`. }
+        effectivePeriod:
+          type: object
+          description: Only for `sleep` (bedtime to wake time).
+          required: [start, end]
+          properties:
+            start: { type: string, format: date-time }
+            end: { type: string, format: date-time }
+        value: { type: number, description: For `anxiety`/`stress` (integer 0–10) and `glucose` (mmol/L). }
+        components:
+          type: array
+          description: For `blood-pressure` (systolic, diastolic, pulse), `bmi` (weight in kg) and `sleep` (sleep-duration in min, awakenings).
+          items:
+            type: object
+            required: [code, value]
+            properties:
+              code: { type: string, enum: [systolic, diastolic, pulse, weight, sleep-duration, awakenings] }
+              value: { type: number }
 
     Component:
       type: object

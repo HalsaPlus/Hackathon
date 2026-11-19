@@ -52,7 +52,11 @@
       "source": "manual-entry",
       "types": [
         "anxiety",
-        "stress"
+        "stress",
+        "blood-pressure",
+        "glucose",
+        "bmi",
+        "sleep"
       ],
       "since": "2026-03-01",
       "lastSyncAt": "2026-11-14T17:43:00Z"
