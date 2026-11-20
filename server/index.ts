@@ -5,6 +5,7 @@ import path from 'node:path';
 import express from 'express';
 import { halsaPlusFromEnv } from '../halsa-plus/src/mount.ts';
 import { loginConfigured, setupAuth } from './auth.ts';
+import { setupCareTeamChannel, setupCareTeamInbound } from './careteam-channel.ts';
 import { setupHalsaLink } from './halsa-link.ts';
 import { setupHalsaConsentGuard } from './halsa-link.ts';
 import { setupMcp } from './mcp.ts';
@@ -39,6 +40,7 @@ app.get('/api/health', (_req, res) => {
 // PDHC pushes ServiceRequests here. It authenticates with X-Push-Secret,
 // not with a login session, so it is registered before setupAuth().
 setupPushEndpoint(app);
+setupCareTeamInbound(app);
 
 // MMD as an MCP server for AI assistants (ChatGPT, Claude …). A secret link
 // per patient is the credential, not the admin login, so it comes before setupAuth().
@@ -78,6 +80,7 @@ if (!loginConfigured) {
 setupHalsaConsentGuard(app);
 setupApi(app);
 setupHalsaLink(app);
+setupCareTeamChannel(app);
 
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found' });
