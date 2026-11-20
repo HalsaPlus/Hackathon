@@ -179,7 +179,16 @@ export function useChatAutoscroll(end: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const list = end.current?.parentElement;
     if (!list) return;
-    const toBottom = (behavior: ScrollBehavior) => window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
+    // Shortly after the Chat screen's own scrollIntoView (which leaves the
+    // newest message behind the input), so the input stays in view too.
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const toBottom = (behavior: ScrollBehavior) => {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
+      }, 60);
+      timers.add(timer);
+    };
     toBottom('auto');
     let height = list.scrollHeight;
     const observer = new ResizeObserver(() => {
@@ -187,6 +196,9 @@ export function useChatAutoscroll(end: RefObject<HTMLElement | null>) {
       height = list.scrollHeight;
     });
     observer.observe(list);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      for (const timer of timers) clearTimeout(timer);
+    };
   }, [end]);
 }
