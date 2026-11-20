@@ -4,6 +4,10 @@
 // /phone?role=drive and /phone?role=follow (read from the /phone page around
 // the app's iframe), or /app/?role=…. Without a role nothing here runs.
 //
+// The role can change during the demo: the "Take control  D" button on
+// /phone (or the D key) makes this browser the driver and the previous driver
+// a follower; "Hand over  D" makes it a follower.
+//
 // The driver sends, every 50 ms and only when something changed: the screen
 // (hash route), the chat input's draft, the scroll position (as a fraction),
 // the sliders, and the last button pressed. The follower applies it, and
@@ -62,11 +66,87 @@ function setValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-export function startMirror(io: { sendState: (state: MirrorState & Record<string, unknown>) => void; onState: (callback: (state: Record<string, unknown>) => void) => () => void }) {
-  const role = mirrorRole();
-  if (role === 'drive') return startDriver(io.sendState);
-  if (role === 'follow') return startFollower(io.onState);
-  return () => undefined;
+interface MirrorIo {
+  sendState: (state: MirrorState & Record<string, unknown>) => void;
+  sendRole: (role: MirrorRole) => void;
+  onMessage: (callback: (message: { type: string; [key: string]: unknown }) => void) => () => void;
+}
+
+/** The "Take control  D" button on /phone, outside the phone (same origin), if there is one. */
+function takeOverButton(): HTMLButtonElement | null {
+  try {
+    return (window.parent !== window ? window.parent.document.getElementById('takeover') : null) as HTMLButtonElement | null;
+  } catch {
+    return null;
+  }
+}
+
+const editing = (target: EventTarget | null) =>
+  target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+
+/**
+ * Mirror mode with a role that can change: "Take control" (button or D)
+ * makes this browser the driver, and the server makes the previous driver a
+ * follower; "Hand over" makes it a follower. Starts with ?role=… .
+ */
+export function startMirror(io: MirrorIo) {
+  const initial = mirrorRole();
+  if (!initial) return () => undefined;
+  let role: MirrorRole = initial;
+  let driverPresent = false;
+  let stopCurrent: () => void = () => undefined;
+  const button = takeOverButton();
+
+  const render = () => {
+    if (!button) return;
+    button.hidden = false;
+    const label = button.firstChild;
+    if (label && label.nodeType === Node.TEXT_NODE) label.textContent = role === 'drive' ? 'Hand over' : 'Take control';
+  };
+  const become = (next: MirrorRole) => {
+    stopCurrent();
+    role = next;
+    stopCurrent = next === 'drive' ? startDriver(io.sendState) : startFollower(io.onMessage, () => driverPresent);
+    render();
+  };
+  const toggle = () => {
+    const next: MirrorRole = role === 'drive' ? 'follow' : 'drive';
+    io.sendRole(next);
+    become(next);
+  };
+
+  // D toggles, in the /phone page and in the app; not while the driver types.
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key !== 'd' && event.key !== 'D') return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (role === 'drive' && editing(event.target)) return;
+    event.preventDefault();
+    toggle();
+  };
+  const windows: Window[] = [window];
+  try {
+    if (window.parent !== window && window.parent.document) windows.push(window.parent);
+  } catch {
+    // Another origin around us.
+  }
+  for (const w of windows) w.addEventListener('keydown', onKey);
+  const onClick = () => toggle();
+  button?.addEventListener('click', onClick);
+
+  const off = io.onMessage((message) => {
+    if (message.type === 'driver') driverPresent = message.present === true;
+    if (message.type === 'role' && (message.role === 'drive' || message.role === 'follow') && message.role !== role) become(message.role);
+  });
+
+  io.sendRole(initial);
+  become(initial);
+  return () => {
+    off();
+    stopCurrent();
+    for (const w of windows) w.removeEventListener('keydown', onKey);
+    button?.removeEventListener('click', onClick);
+    if (button) button.hidden = true;
+  };
 }
 
 function startDriver(sendState: (state: MirrorState & Record<string, unknown>) => void) {
@@ -90,15 +170,16 @@ function startDriver(sendState: (state: MirrorState & Record<string, unknown>) =
   };
 }
 
-function startFollower(onState: (callback: (state: Record<string, unknown>) => void) => () => void) {
+function startFollower(onMessage: MirrorIo['onMessage'], driverPresent: () => boolean) {
   let driverAt = 0;
   let pressAt = 0;
-  // The stage's own keyboard and mouse are ignored while a driver is active.
+  // The stage's own keyboard and mouse are ignored while a driver is active
+  // (D still works: it takes control).
   const block = (event: Event) => {
-    if (event.isTrusted && Date.now() - driverAt < 15_000) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
+    if (!event.isTrusted || !(driverPresent() || Date.now() - driverAt < 3000)) return;
+    if (event instanceof KeyboardEvent && (event.key === 'd' || event.key === 'D')) return;
+    event.preventDefault();
+    event.stopPropagation();
   };
   const blocked = ['keydown', 'beforeinput', 'pointerdown', 'mousedown', 'click', 'touchstart', 'wheel'] as const;
   for (const type of blocked) document.addEventListener(type, block, { capture: true, passive: false });
@@ -135,8 +216,9 @@ function startFollower(onState: (callback: (state: Record<string, unknown>) => v
     }
   };
 
-  const off = onState((raw) => {
-    const state = raw as unknown as MirrorState;
+  const off = onMessage((message) => {
+    if (message.type !== 'mirror' || !message.state || typeof message.state !== 'object') return;
+    const state = message.state as unknown as MirrorState;
     driverAt = Date.now();
     if (typeof state.hash === 'string' && state.hash !== (window.location.hash || '#/')) {
       window.location.hash = state.hash;

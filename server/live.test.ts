@@ -147,6 +147,9 @@ test('events for a report (observations, stops), a new request, a plan opened an
 test('mirror: what the driver sends reaches the other subscribers of the patient, not the driver', async () => {
   const driver = await connect(ANDREA_GUID);
   const follower = await connect(ANDREA_GUID);
+  driver.socket.send(JSON.stringify({ type: 'role', role: 'drive' }));
+  follower.socket.send(JSON.stringify({ type: 'role', role: 'follow' }));
+  assert.ok(await waitFor(() => follower.received.some((m) => m.type === 'driver' && m.present === true)));
   const state = { hash: '#/chat', draft: 'Hej, jag har ont', scroll: 0.5, sliders: {}, press: null };
   driver.socket.send(JSON.stringify({ type: 'mirror', state }));
   assert.ok(await waitFor(() => follower.received.some((m) => m.type === 'mirror' && m.state.draft === 'Hej, jag har ont')));
@@ -190,4 +193,36 @@ test("the app's live client subscribes, reconnects after the connection drops, a
   addMessage(ANDREA_GUID, 'care-team', 'Efter återanslutning.');
   assert.ok(await waitFor(() => messages.some((m) => m.type === 'changed' && m.topics.includes('messages'))));
   client.stop();
+});
+
+test('take control: one driver per patient; the previous driver becomes a follower, and only the driver is mirrored', async () => {
+  const a = await connect(ANDREA_GUID);
+  const b = await connect(ANDREA_GUID);
+  const roleOf = (c: { received: any[] }) => c.received.filter((m) => m.type === 'role').at(-1)?.role;
+  const mirror = (c: { socket: WebSocket }, draft: string) =>
+    c.socket.send(JSON.stringify({ type: 'mirror', state: { hash: '#/chat', draft, scroll: 0, sliders: {}, press: null } }));
+  const sawDraft = (c: { received: any[] }, draft: string) => c.received.some((m) => m.type === 'mirror' && m.state.draft === draft);
+
+  a.socket.send(JSON.stringify({ type: 'role', role: 'drive' }));
+  b.socket.send(JSON.stringify({ type: 'role', role: 'follow' }));
+  assert.ok(await waitFor(() => roleOf(a) === 'drive' && roleOf(b) === 'follow'));
+
+  // B takes control: A is told it now follows.
+  b.socket.send(JSON.stringify({ type: 'role', role: 'drive' }));
+  assert.ok(await waitFor(() => roleOf(b) === 'drive' && roleOf(a) === 'follow'));
+  mirror(a, 'from A, no longer the driver');
+  mirror(b, 'from B, the driver');
+  assert.ok(await waitFor(() => sawDraft(a, 'from B, the driver')));
+  await sleep(150);
+  assert.equal(sawDraft(b, 'from A, no longer the driver'), false, "a follower's state is not passed on");
+
+  // A takes control back.
+  a.socket.send(JSON.stringify({ type: 'role', role: 'drive' }));
+  assert.ok(await waitFor(() => roleOf(a) === 'drive' && roleOf(b) === 'follow'));
+
+  // A hands over: nobody drives, and everyone hears it.
+  a.socket.send(JSON.stringify({ type: 'role', role: 'follow' }));
+  assert.ok(await waitFor(() => b.received.filter((m) => m.type === 'driver').at(-1)?.present === false));
+  a.socket.close();
+  b.socket.close();
 });
