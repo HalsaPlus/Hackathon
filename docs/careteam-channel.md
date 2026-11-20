@@ -91,6 +91,34 @@ Ett 2xx-svar räknas som levererat, och ett id i svaret sparas.
 - **Avvisas och loggas:** meddelanden för andra patienter.
 - **Push:** svaret är ett FHIR-svarsmeddelande med `MessageHeader.response`.
 
+## Rapporterade värden till vårdteamet
+
+Andreas rapporterade värden går till vårdteamets system i stället för PDHC:s gateway (`server/careteam-values.ts`). Två inställningar i kortet styr det:
+
+- **Reported values go to** (`valuesTarget`): `careteam` (standard) eller `pdhc`, som förut. Går att växla tillbaka utan ny deploy.
+- **Values URL** (`valuesUrl`): standard `https://nordic-hackathon-2026.onrender.com/api/mmd`.
+
+**Anropet:** `POST {valuesUrl}` med samma token och auth-header som chatten. Kroppen är en `Bundle` av typen `transaction`, med en `Observation` per värde, var och en med `request: { method: POST, url: Observation }`.
+
+**Varje Observation:**
+- `status: final`;
+- `category`: `vital-signs`, eller `survey` för 1–7-skattningar;
+- `subject`: `Patient/<patientGuid>`, och för Andrea även hennes personnummer som `identifier`;
+- `basedOn`: `ServiceRequest/<request.guid>`;
+- `code.text`: värdets namn, och `coding` med PDHC:s concept-GUID (`urn:pdhc:concept`) och transaction-GUID (`urn:pdhc:transaction`) när de finns;
+- `effectiveDateTime`: när värdet registrerades;
+- `valueQuantity` (tal och enhet, UCUM när den är känd) för tal, annars `valueString`;
+- `device.display` och `note` när de finns;
+- `meta.tag`: källa MMD och patientrapporterat.
+
+**Allt före utskicket är som förut:** samtyckesvakten, kontrollen av stängda planer, att värdena sparas lokalt, och demoläget för demoplaner.
+
+**Utfall:**
+- **2xx:** värdena markeras som skickade och bekräftade ("Sent to the care team"). Observation-id:na i svaret sparas som kvitto i `careteam_value_receipts`.
+- **Annat svar, nätverksfel eller ingen token:** värdena markeras `failed` med ett kort meddelande. Token syns aldrig i meddelandet eller loggen.
+
+Adminsidans testrapporter går samma väg.
+
 ## Frågor till Casper om hans API skiljer sig
 
 - **Adress:** vilken är FHIR-basen? Tar de emot `$process-message`, eller vill de ha `POST /Bundle` eller `/Communication`? Det ändras i **Send path**.
@@ -115,3 +143,5 @@ curl http://localhost:4010/messages      # allt mocken har tagit emot och svarat
 ```
 
 **Push:** starta mocken med `MOCK_PUSH_URL=http://localhost:3001/api/v1/inbound/message` och `MOCK_PUSH_SECRET=<samma som i kortet>`, och välj Push i kortet.
+
+**Värden:** sätt Values URL till `http://localhost:4010/api/mmd`. Mocken svarar med en `transaction-response` och sparar Bundle:n.

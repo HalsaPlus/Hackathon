@@ -20,6 +20,8 @@
 //   POST /fhir/$process-message         what MMD sends (a FHIR message Bundle)
 //   GET  /fhir/Communication?patient=Patient/<guid>&_lastUpdated=gt<time>
 //                                       the care team's replies, for poll mode
+//   POST /api/mmd                      the patient's reported values (a FHIR transaction
+//                                       Bundle of Observations); values URL http://localhost:4010/api/mmd
 //   POST /reply   { "text": "…", "sender": "Nurse Eva (demo)" }
 //                                       writes a reply (and pushes it in push mode)
 //   GET  /messages                      everything received and replied, to look at
@@ -52,6 +54,10 @@ export function createMockCareTeam(options: MockOptions = {}) {
   const received: Json[] = [];
   const replies: Json[] = [];
   const pushes: { status: number; at: string }[] = [];
+  /** The transaction Bundles of reported values received at POST /api/mmd, with their auth header. */
+  const values: { bundle: Json; authorization: string | undefined }[] = [];
+  /** Set status to make POST /api/mmd fail, e.g. 500, for tests. */
+  const valuesAnswer: { status: number | null } = { status: null };
   /** How many times the replies were fetched (GET Communication), for tests. */
   const stats = { polls: 0 };
   let next = 1;
@@ -89,6 +95,25 @@ export function createMockCareTeam(options: MockOptions = {}) {
       id,
       type: 'message',
       entry: [{ resource: { resourceType: 'MessageHeader', id, response: { identifier: header.id ?? 'unknown', code: 'ok' }, source: { endpointUrl: 'http://mock-careteam' } } }],
+    });
+  });
+
+  app.post('/api/mmd', (req, res) => {
+    if (!authorized(req)) return res.status(401).json(outcome('security', 'Missing or wrong token.'));
+    if (valuesAnswer.status) return res.status(valuesAnswer.status).json(outcome('exception', 'The mock was told to fail.'));
+    const bundle = req.body as Json;
+    if (bundle?.resourceType !== 'Bundle' || bundle.type !== 'transaction' || !Array.isArray(bundle.entry)) {
+      return res.status(400).json(outcome('invalid', 'Expected a Bundle of type transaction.'));
+    }
+    values.push({ bundle, authorization: req.get('Authorization') });
+    // Like a FHIR server: a transaction-response with each new Observation's location.
+    res.status(200).json({
+      resourceType: 'Bundle',
+      type: 'transaction-response',
+      entry: bundle.entry.map(() => {
+        const id = `mock-obs-${instance}-${next++}`;
+        return { response: { status: '201 Created', location: `Observation/${id}/_history/1` } };
+      }),
     });
   });
 
@@ -164,7 +189,7 @@ export function createMockCareTeam(options: MockOptions = {}) {
     });
   });
 
-  return { app, received, replies, pushes, stats };
+  return { app, received, replies, pushes, stats, values, valuesAnswer };
 }
 
 /** Starts the mock on a port (0 = any free port); resolves to its base URL and a stop function. */
