@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { call } from '../../api.ts';
 import type { ScreenProps } from '../App.tsx';
-import { useCareTeamChannel } from '../careteam.ts';
+import { useCareTeamChannel, useChatAutoscroll } from '../careteam.ts';
 import { PlanIcon, SendIcon } from '../icons.tsx';
 import { activeRequests, formatClock, formatShort, startOfDay } from '../model.ts';
 
@@ -15,6 +15,7 @@ export function ChatScreen({ view, patientGuid, refresh, today }: ScreenProps) {
   const end = useRef<HTMLDivElement>(null);
   const plans = activeRequests(view).flatMap((r) => r.carePlans.map((p) => p.title)).filter(Boolean);
   const careTeam = useCareTeamChannel(patientGuid, refresh, view.messages.length);
+  useChatAutoscroll(end);
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'end' });

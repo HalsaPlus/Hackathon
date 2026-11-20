@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { AppView } from '../../shared/types.ts';
 import { call } from '../api.ts';
 import { ChatIcon, HealthIcon, HomeIcon, PlanIcon } from './icons.tsx';
+import { useLiveSync } from './live.ts';
 import { startOfDay } from './model.ts';
 import { ChatScreen } from './screens/Chat.tsx';
 import { HealthScreen } from './screens/Health.tsx';
@@ -75,6 +76,7 @@ export default function App() {
     setView(null);
     void refresh();
   }, [refresh]);
+  useLiveSync(patientGuid, refresh);
 
   const choose = (guid: string) => {
     try {

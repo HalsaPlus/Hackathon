@@ -13,6 +13,7 @@ import {
 } from '../../shared/halsa.ts';
 import type { ObservationView, Transaction } from '../../shared/types.ts';
 import { isRating } from './healthkit.ts';
+import { onLiveChange } from './live.ts';
 
 // Hälsa+ in the patient app. For a patient linked to Hälsa+ (server side, see
 // server/halsa-link.ts), values the plan asks for come from Hälsa+ instead of
@@ -161,7 +162,14 @@ export function useHalsaSeries(patientGuid: string): HalsaState {
 
 export function useHalsaOverview(patientGuid: string) {
   const url = useMemo(() => `${base(patientGuid)}/overview?${withAsOf()}`, [patientGuid]);
-  return useHalsaJson<HalsaOverview>(url);
+  const state = useHalsaJson<HalsaOverview>(url);
+  useLiveReload(state.reload, 'observations');
+  return state;
+}
+
+/** Live updates (server/live.ts): reload when one of the topics changed for this patient. */
+function useLiveReload(reload: () => void, ...topics: string[]) {
+  useEffect(() => onLiveChange((changed) => changed.some((t) => topics.includes(t)) && reload()), [reload, topics.join(',')]);
 }
 
 export function useHalsaVaccinations(patientGuid: string) {
@@ -172,6 +180,7 @@ export function useHalsaVaccinations(patientGuid: string) {
 export function useHalsaConsent(patientGuid: string, requestGuid: string | undefined) {
   const url = requestGuid ? `${base(patientGuid)}/consent/${encodeURIComponent(requestGuid)}` : null;
   const state = useHalsaJson<HalsaConsent>(url);
+  useLiveReload(state.reload, 'consent');
   const decide = useCallback(
     async (decision: 'accept' | 'decline'): Promise<string | null> => {
       if (!url) return null;

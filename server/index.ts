@@ -8,6 +8,7 @@ import { loginConfigured, setupAuth } from './auth.ts';
 import { setupCareTeamChannel, setupCareTeamInbound } from './careteam-channel.ts';
 import { setupHalsaLink } from './halsa-link.ts';
 import { setupHalsaConsentGuard } from './halsa-link.ts';
+import { setupLive } from './live.ts';
 import { setupMcp } from './mcp.ts';
 import { setupApi, setupPushEndpoint } from './routes.ts';
 import { startPolling } from './sync.ts';
@@ -81,6 +82,7 @@ setupHalsaConsentGuard(app);
 setupApi(app);
 setupHalsaLink(app);
 setupCareTeamChannel(app);
+setupLive(server, app);
 
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found' });
