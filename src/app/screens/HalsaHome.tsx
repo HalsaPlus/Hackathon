@@ -124,7 +124,7 @@ export function HalsaHome({ overview, onOpen }: { overview: HalsaLoad<HalsaOverv
           {overview.data.healthScore === null ? '–' : `${overview.data.healthScore}%`}
         </p>
         <p className="muted small" style={{ margin: 0 }}>
-          From Hälsa+ · last 14 days · demo ranges
+          From Hälsa+ · last 14 days
         </p>
       </div>
       <Body overview={overview.data} onOpen={onOpen} />
@@ -201,7 +201,6 @@ function MeasureCard({ measure, points }: { measure: OverviewMeasure; points: Ha
       {shown === 'graph' && (
         <span className="muted small">
           {count} values · last 14 days
-          {measure.range ? ` · demo range ${measure.range}` : ''}
         </span>
       )}
     </li>

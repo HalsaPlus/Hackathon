@@ -19,6 +19,7 @@ import {
   pointsFromObservation,
 } from '../shared/halsa.ts';
 import { db, get, now, run } from './db.ts';
+import { notifyChanged } from './live.ts';
 import { getServiceRequestRow } from './store.ts';
 
 // The link between an MMD patient and the same patient's Hälsa+ account.
@@ -376,6 +377,7 @@ export function setupHalsaLink(app: Express) {
     if (!ownRequest(String(req.params.patient), String(req.params.sr))) return res.status(404).json({ error: 'The plan was not found.' });
     try {
       res.status(201).json(await writeHalsaConsent(token, String(req.params.sr), (req.body ?? {}).decision));
+      notifyChanged(String(req.params.patient), ['consent']);
     } catch (error) {
       sendHalsaError(res, error);
     }
@@ -388,6 +390,7 @@ export function setupHalsaLink(app: Express) {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
       res.status(201).json({ points: await writeHalsaRating(token, { type: body.type, value: body.value, asOf: req.query.asOf }) });
+      notifyChanged(String(req.params.patient), ['observations']);
     } catch (error) {
       sendHalsaError(res, error);
     }

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { type RefObject, useCallback, useEffect, useState } from 'react';
 import type { MessageView } from '../../shared/types.ts';
+import { liveConnected, onLiveChange, setLiveChatVisible } from './live.ts';
 
 // The care-team channel in the patient's chat (server/careteam-channel.ts).
 // When the channel is on for this patient: a subtle delivery status under her
@@ -21,6 +22,8 @@ export interface ChatPollerDeps {
   intervalMs?: number;
   setTimer?: (callback: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
+  /** Told when the chat becomes active (open and visible) or stops being so. */
+  onActive?: (active: boolean) => void;
 }
 
 /**
@@ -36,6 +39,12 @@ export function createChatPoller(deps: ChatPollerDeps) {
   let busy = false;
   let timer: unknown = null;
   let unsubscribe: (() => void) | null = null;
+  let active = false;
+  const setActive = (value: boolean) => {
+    if (value === active) return;
+    active = value;
+    deps.onActive?.(value);
+  };
 
   const cancel = () => {
     if (timer !== null) clearTimer(timer);
@@ -60,13 +69,16 @@ export function createChatPoller(deps: ChatPollerDeps) {
       if (running) return;
       running = true;
       unsubscribe = deps.onVisibilityChange(() => {
+        setActive(deps.isVisible());
         if (!deps.isVisible()) cancel();
         else if (timer === null && !busy) void round();
       });
+      setActive(deps.isVisible());
       void round();
     },
     stop() {
       running = false;
+      setActive(false);
       cancel();
       unsubscribe?.();
       unsubscribe = null;
@@ -116,11 +128,15 @@ export function useCareTeamChannel(patientGuid: string, refresh: () => Promise<v
       if (!(await load()) || !live) return;
       poller = createChatPoller({
         tick: async () => {
+          // With live updates the server asks the care team while the chat is
+          // visible (chat-visible below) and tells the page; no polling here.
+          if (liveConnected()) return;
           await fetch(`${base}/poll`, { method: 'POST', credentials: 'same-origin' });
           if (!live) return;
           await refresh();
           await load();
         },
+        onActive: (active) => setLiveChatVisible(active),
         isVisible: () => document.visibilityState === 'visible',
         onVisibilityChange: (callback) => {
           document.addEventListener('visibilitychange', callback);
@@ -135,6 +151,9 @@ export function useCareTeamChannel(patientGuid: string, refresh: () => Promise<v
     };
   }, [base, load, refresh]);
 
+  // Live updates: a new message or delivery status reloads the notes.
+  useEffect(() => onLiveChange((topics) => topics.some((t) => t === 'messages' || t === 'delivery') && void load()), [load]);
+
   // After she sends a message, its status follows within a few seconds.
   useEffect(() => {
     if (!state.enabled) return;
@@ -148,4 +167,38 @@ export function useCareTeamChannel(patientGuid: string, refresh: () => Promise<v
     /** "Nurse Eva · " before a care team member's reply, when their system names them. */
     sender: (message: Pick<MessageView, 'id' | 'sender'>) => (message.sender === 'care-team' && state.senders[message.id] ? `${state.senders[message.id]} · ` : ''),
   };
+}
+
+/**
+ * The chat follows the newest message: at once when the chat opens, then a
+ * smooth scroll whenever the conversation grows (a new message from her or
+ * the care team, a plan card, a status line under her message). `end` is the
+ * marker after the last message.
+ */
+export function useChatAutoscroll(end: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const list = end.current?.parentElement;
+    if (!list) return;
+    // Shortly after the Chat screen's own scrollIntoView (which leaves the
+    // newest message behind the input), so the input stays in view too.
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const toBottom = (behavior: ScrollBehavior) => {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
+      }, 60);
+      timers.add(timer);
+    };
+    toBottom('auto');
+    let height = list.scrollHeight;
+    const observer = new ResizeObserver(() => {
+      if (list.scrollHeight > height) toBottom('smooth');
+      height = list.scrollHeight;
+    });
+    observer.observe(list);
+    return () => {
+      observer.disconnect();
+      for (const timer of timers) clearTimeout(timer);
+    };
+  }, [end]);
 }
