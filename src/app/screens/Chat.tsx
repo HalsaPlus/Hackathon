@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { call } from '../../api.ts';
 import type { ScreenProps } from '../App.tsx';
+import { useCareTeamChannel } from '../careteam.ts';
 import { PlanIcon, SendIcon } from '../icons.tsx';
 import { activeRequests, formatClock, formatShort, startOfDay } from '../model.ts';
 
@@ -13,6 +14,7 @@ export function ChatScreen({ view, patientGuid, refresh, today }: ScreenProps) {
   const [error, setError] = useState<string | null>(null);
   const end = useRef<HTMLDivElement>(null);
   const plans = activeRequests(view).flatMap((r) => r.carePlans.map((p) => p.title)).filter(Boolean);
+  const careTeam = useCareTeamChannel(patientGuid, refresh, view.messages.length);
 
   useEffect(() => {
     end.current?.scrollIntoView({ block: 'end' });
@@ -84,8 +86,10 @@ export function ChatScreen({ view, patientGuid, refresh, today }: ScreenProps) {
                   <div className={`bubble ${m.sender === 'patient' ? 'me' : 'them'}`}>
                     {m.text}
                     <span className="bubble-time">
+                      {careTeam.sender(m)}
                       {m.via ? `via ${m.via} · ` : ''}
                       {formatClock(m.createdAt)}
+                      {careTeam.note(m)}
                     </span>
                   </div>
                 )}

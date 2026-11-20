@@ -2,6 +2,7 @@ import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import type { ConnectionView, InboundLogEntry, TestReportResult } from '../../shared/types.ts';
 import { api, type ConnectionInput } from '../api.ts';
 import { ServiceSettingsCard } from '../components/ServiceSettingsCard.tsx';
+import { CareTeamChannelCard } from '../components/CareTeamChannelCard.tsx';
 import { formatDateTime } from '../format.ts';
 
 // Where the user puts in PDHC's URL and token, tests the connection and
@@ -547,6 +548,7 @@ export function ConnectionsPage() {
         ))}
 
       <ServiceSettingsCard />
+      <CareTeamChannelCard />
 
       <article className="card">
         <h2>Push address</h2>
