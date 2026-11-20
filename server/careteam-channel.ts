@@ -750,7 +750,7 @@ export function setupCareTeamChannel(app: Express, options: { timers?: boolean }
       id: 0,
       patientGuid: settings.patientGuid,
       sender: 'patient',
-      text: 'Testmeddelande från MMD, syntetisk data',
+      text: 'Test message from MMD (synthetic data)',
       serviceRequestGuid: null,
       createdAt: now(),
     };

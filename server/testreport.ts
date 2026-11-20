@@ -18,7 +18,7 @@ import { getPatientView } from './store.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
 
-export const TEST_NOTE = 'Testdata från MMD:s admin-konsol (syntetisk).';
+export const TEST_NOTE = 'Test data from the MMD admin console (synthetic).';
 
 interface Rule {
   min: number;
