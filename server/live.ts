@@ -253,3 +253,9 @@ export function setupLive(server: Server, app: Express, options: LiveOptions = {
 export function liveClientCount() {
   return clients.size;
 }
+
+/** For tests: drops every connection, as a restart or a network glitch would. */
+export function dropAllLiveClients() {
+  for (const client of clients) client.socket.close(1012);
+  clients.clear();
+}
