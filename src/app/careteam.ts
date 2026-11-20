@@ -4,7 +4,7 @@ import type { MessageView } from '../../shared/types.ts';
 // The care-team channel in the patient's chat (server/careteam-channel.ts).
 // When the channel is on for this patient: a subtle delivery status under her
 // own messages, the care team member's name on their replies, a fetch from the
-// care team when the chat opens, and a refresh every 10 seconds while it is
+// care team when the chat opens, and a refresh every 5 seconds while it is
 // open. When it is off, nothing here shows and nothing is fetched again.
 
 interface ChannelState {
@@ -52,7 +52,7 @@ export function useCareTeamChannel(patientGuid: string, refresh: () => Promise<v
       await load();
       timer = setInterval(() => {
         void refresh().then(load);
-      }, 10_000);
+      }, 5_000);
     })();
     return () => {
       live = false;
