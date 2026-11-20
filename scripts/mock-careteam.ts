@@ -78,9 +78,10 @@ export function createMockCareTeam(options: MockOptions = {}) {
 
   app.get('/fhir/Communication', (req, res) => {
     if (!authorized(req)) return res.status(401).json(outcome('security', 'Missing or wrong token.'));
+    // Either ?patient=Patient/<id>&_lastUpdated=gt<time>, or (like the real one) ?_since=<time> for all.
     const patient = String(req.query.patient ?? '').replace(/^Patient\//, '');
-    const since = String(req.query._lastUpdated ?? '').replace(/^gt/, '');
-    const items = replies.filter((c) => c.subject.reference === `Patient/${patient}` && (!since || c.meta.lastUpdated > since));
+    const since = String(req.query._since ?? req.query._lastUpdated ?? '').replace(/^gt/, '');
+    const items = replies.filter((c) => (!patient || c.subject?.reference === `Patient/${patient}`) && (!since || c.sent > since));
     res.json({ resourceType: 'Bundle', type: 'searchset', total: items.length, entry: items.map((resource) => ({ resource })) });
   });
 
@@ -93,7 +94,7 @@ export function createMockCareTeam(options: MockOptions = {}) {
       id: `mock-reply-${instance}-${next++}`,
       meta: { lastUpdated: at },
       status: 'completed',
-      subject: { reference: `Patient/${typeof req.body?.patient === 'string' ? req.body.patient : patientGuid}` },
+      ...(req.body?.patient === null ? {} : { subject: { reference: `Patient/${typeof req.body?.patient === 'string' ? req.body.patient : patientGuid}` } }),
       sender: { display: typeof req.body?.sender === 'string' ? req.body.sender : 'Care team (demo)' },
       recipient: [{ reference: `Patient/${patientGuid}` }],
       sent: at,

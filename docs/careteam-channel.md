@@ -20,6 +20,7 @@ Admin → **Connection** → kortet **Care-team chat channel**:
 | Push secret | Vid push: minst 16 tecken. Ge den till dem, tillsammans med push-adressen som kortet visar: `https://mmd-hackathon.onrender.com/api/v1/inbound/message` med headern `X-Push-Secret`. |
 | Test path | Standard `metadata`, alltså `GET {endpoint}/metadata` |
 | Patient GUID | Standard är Andrea, `28a29239-6424-48e7-a123-9d9e863670b8` |
+| Care team patient aliases | Kommaseparerade id:n som vårdteamets system använder för samma patient. Standard `a7d3c1e2-5b4f-4c6a-9e8d-2f1b0c3d4e51` (Caspers demopatient). Ett svar om ett alias, eller utan patient, sparas för Andrea; andra patienter avvisas. |
 
 Kryssa i **Channel on** och spara. Sedan:
 - **Test connection** visar statuskod och svar.
@@ -27,6 +28,18 @@ Kryssa i **Channel on** och spara. Sedan:
 - **Fetch now** hämtar svar direkt i poll-läge.
 
 Bara meddelanden som skrivs efter att kanalen slogs på skickas.
+
+### Caspers endpoint (kontrollerad 2026-11-20)
+
+| Fält | Värde |
+| --- | --- |
+| Endpoint URL | `https://nordic-hackathon-2026.onrender.com/api/chat` |
+| Token | Caspers token (från Christian, inte i repot) |
+| Replies from the care team | Poll (han har ingen push) |
+| Poll path | `Communication?_since={since}` |
+| Övriga | standardvärden (`Authorization: Bearer {token}`, `$process-message`, R5) |
+
+Hans system är FHIR R5, tar emot `$process-message` och söker `Communication` med `_since`. Hans token är inte knuten till ett patient-id, så matchningen görs hos oss med aliasen.
 
 ## Det MMD skickar
 
@@ -55,6 +68,7 @@ Ett 2xx-svar räknas som levererat, och ett id i svaret sparas.
 - **Format:** `Communication`-resurser i en `Bundle` (searchset eller message), med texten i `contentString` eller `contentCodeableConcept.text`.
 - **Avsändarnamn:** `sender.display` visas vid svaret.
 - **Dubbletter:** samma `Communication.id` sparas bara en gång.
+- **Bara nytt:** bara det vårdteamet skrev efter att kanalen slogs på importeras.
 - **Ignoreras:** MMD:s egna meddelanden (`meta.source` = `MMD`, id `mmd-message-…`, eller avsändare som är en Patient).
 - **Avvisas och loggas:** meddelanden för andra patienter.
 - **Push:** svaret är ett FHIR-svarsmeddelande med `MessageHeader.response`.

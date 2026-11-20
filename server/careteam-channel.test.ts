@@ -21,6 +21,8 @@ const { startMockCareTeam } = await import('../scripts/mock-careteam.ts');
 const fixture = (name: string) => JSON.parse(readFileSync(path.join(import.meta.dirname, 'fixtures', name), 'utf8'));
 const ANDREAS_PLAN = 'd6b81ca3-5149-46d5-9ba1-582716f263b2';
 const PUSH_SECRET = 'push-secret-for-tests-0123456789';
+const CASPER_ALIAS = 'a7d3c1e2-5b4f-4c6a-9e8d-2f1b0c3d4e51';
+const OTHER_GUID = '11111111-2222-4333-8444-555555555555';
 const OFF = { enabled: false, endpointUrl: '', token: '', pushSecret: '', receiveMode: 'poll', payloadFormat: 'r5' };
 
 type Mock = Awaited<ReturnType<typeof startMockCareTeam>>;
@@ -172,14 +174,16 @@ test('inbound is idempotent, ignores our own messages and rejects other patients
       { resource: communication('ct-1', ANDREA_GUID, 'R4-style text.') },
       { resource: communication('mmd-message-7', ANDREA_GUID, 'Our own, echoed back.', { meta: { source: 'MMD' } }) },
       { resource: communication('ct-2', ANDREA_GUID, 'Written by Andrea.', { sender: { reference: `Patient/${ANDREA_GUID}` } }) },
-      { resource: communication('ct-3', 'a7d3c1e2-5b4f-4c6a-9e8d-2f1b0c3d4e51', 'For someone else.') },
+      { resource: communication('ct-3', OTHER_GUID, 'For someone else.') },
     ],
   };
   const count = listMessages(ANDREA_GUID).length;
-  assert.deepEqual(receiveBundle(bundle, settings), { stored: 1, duplicates: 0, ignored: 2, rejected: 1, latest: bundle.entry[0].resource.sent });
+  const first = receiveBundle(bundle, settings);
+  assert.deepEqual([first.stored, first.duplicates, first.ignored, first.rejected], [1, 0, 2, 1]);
+  assert.ok(first.latest);
   assert.deepEqual(receiveBundle(bundle, settings).duplicates, 1);
   assert.equal(listMessages(ANDREA_GUID).length, count + 1);
-  assert.equal(listMessages('a7d3c1e2-5b4f-4c6a-9e8d-2f1b0c3d4e51').some((m) => m.text === 'For someone else.'), false);
+  assert.equal(listMessages(ANDREA_GUID).some((m) => m.text === 'For someone else.'), false);
   assert.ok(all<{ detail: string }>("SELECT detail FROM careteam_log WHERE outcome = 'rejected'").some((l) => /another patient/.test(l.detail)));
 });
 
@@ -220,4 +224,61 @@ test('settings: secrets are write-only, URLs are checked, and the patient defaul
   assert.equal(getChannelSettings().authHeader, 'Authorization: Bearer {token}');
   assert.deepEqual(channel.authHeaders({ ...getChannelSettings(), authHeader: 'X-Api-Key' }), { 'X-Api-Key': 'abcd-efgh-1234' });
   saveChannelSettings(OFF);
+});
+
+test("aliases: the care team's id for Andrea, or no subject, is stored for Andrea; any other patient is rejected", () => {
+  const settings = on();
+  assert.deepEqual(settings.patientAliases, [CASPER_ALIAS], 'the default alias is Casper\'s demo patient GUID');
+  const reply = (id: string, subject: string | null, text: string) => ({
+    resourceType: 'Communication',
+    id,
+    ...(subject ? { subject: { reference: `Patient/${subject}` } } : {}),
+    sender: { display: 'Karin, diabetes nurse (demo)' },
+    sent: new Date().toISOString(),
+    payload: [{ contentCodeableConcept: { text } }],
+  });
+  const bundle = {
+    resourceType: 'Bundle',
+    type: 'searchset',
+    entry: [
+      { resource: reply('alias-1', CASPER_ALIAS, 'About Andrea, by the care team\'s id.') },
+      { resource: reply('alias-2', null, 'No subject at all.') },
+      { resource: reply('alias-3', ANDREA_GUID, 'By our GUID.') },
+      { resource: reply('alias-4', OTHER_GUID, 'Someone else.') },
+      // Andrea's own message as his system shows it: sender = the alias patient.
+      { resource: { ...reply('alias-5', CASPER_ALIAS, 'Written by Andrea.'), sender: { reference: `Patient/${CASPER_ALIAS}` } } },
+    ],
+  };
+  const result = receiveBundle(bundle, settings);
+  assert.deepEqual([result.stored, result.rejected, result.ignored], [3, 1, 1]);
+  const texts = listMessages(ANDREA_GUID).map((m) => m.text);
+  for (const text of ["About Andrea, by the care team's id.", 'No subject at all.', 'By our GUID.']) assert.ok(texts.includes(text), text);
+  assert.ok(!texts.includes('Someone else.') && !texts.includes('Written by Andrea.'));
+  assert.ok(all<{ detail: string }>("SELECT detail FROM careteam_log WHERE outcome = 'rejected'").some((l) => l.detail.includes(OTHER_GUID)));
+
+  // The aliases are a setting; empty means none.
+  assert.deepEqual(saveChannelSettings({ patientAliases: ' x-1 , x-2 ' }).patientAliases, ['x-1', 'x-2']);
+  assert.deepEqual(saveChannelSettings({ patientAliases: '' }).patientAliases, []);
+  saveChannelSettings({ patientAliases: CASPER_ALIAS });
+});
+
+test('only what the care team wrote after the channel was turned on is imported', () => {
+  saveChannelSettings(OFF);
+  const settings = on();
+  const before = { resourceType: 'Communication', id: 'old-1', subject: { reference: `Patient/${CASPER_ALIAS}` }, sender: { display: 'Karin (demo)' }, sent: '2026-11-18T12:10:00.000Z', payload: [{ contentCodeableConcept: { text: 'An old message.' } }] };
+  const after = { ...before, id: 'new-1', sent: new Date(Date.now() + 1000).toISOString(), payload: [{ contentCodeableConcept: { text: 'A new message.' } }] };
+  const result = receiveBundle({ resourceType: 'Bundle', type: 'searchset', entry: [{ resource: before }, { resource: after }] }, settings);
+  assert.deepEqual([result.stored, result.ignored], [1, 1]);
+  const texts = listMessages(ANDREA_GUID).map((m) => m.text);
+  assert.ok(texts.includes('A new message.') && !texts.includes('An old message.'));
+});
+
+test("poll with the real endpoint's search: Communication?_since={since}, replies about the alias", async () => {
+  saveChannelSettings(OFF);
+  on({ receiveMode: 'poll', pollPath: 'Communication?_since={since}' });
+  await fetch(`${mock.base}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Svar om aliaset.', sender: 'Karin (demo)', patient: CASPER_ALIAS }) });
+  const result = await pollOnce();
+  assert.deepEqual('stored' in result && result.stored, 1);
+  assert.ok(listMessages(ANDREA_GUID).some((m) => m.text === 'Svar om aliaset.' && m.sender === 'care-team'));
+  saveChannelSettings({ pollPath: '' });
 });

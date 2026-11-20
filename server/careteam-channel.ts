@@ -39,6 +39,8 @@ export const DEFAULTS = {
   pollPath: 'Communication?patient=Patient/{patientGuid}&_lastUpdated=gt{since}',
   healthPath: 'metadata',
   patientGuid: ANDREA_GUID,
+  /** The care team's own id for the same patient (Casper's demo patient GUID). */
+  patientAliases: 'a7d3c1e2-5b4f-4c6a-9e8d-2f1b0c3d4e51',
   payloadFormat: 'r5' as PayloadFormat,
 };
 
@@ -56,6 +58,8 @@ export interface ChannelSettings {
   healthPath: string;
   pushSecret: string | null;
   patientGuid: string;
+  /** Other ids the care team's system may use for the same patient; their Communications are stored for patientGuid. */
+  patientAliases: string[];
   payloadFormat: PayloadFormat;
 }
 
@@ -127,6 +131,10 @@ export function getChannelSettings(): ChannelSettings {
     healthPath: readKey('health_path') ?? DEFAULTS.healthPath,
     pushSecret: readKey('push_secret'),
     patientGuid: readKey('patient_guid') ?? DEFAULTS.patientGuid,
+    patientAliases: (readKey('patient_aliases') ?? DEFAULTS.patientAliases)
+      .split(',')
+      .map((alias) => alias.trim())
+      .filter(Boolean),
     payloadFormat: format === 'r4' ? 'r4' : 'r5',
   };
 }
@@ -193,6 +201,12 @@ export function saveChannelSettings(body: unknown): ChannelSettings {
     const value = text(field);
     if (value !== undefined) changes.push([key, value]);
   }
+  if (input.patientAliases !== undefined) {
+    const raw = Array.isArray(input.patientAliases) ? input.patientAliases.join(',') : input.patientAliases;
+    if (raw !== null && typeof raw !== 'string') throw new ChannelError('patientAliases must be text.');
+    // An empty field is kept as empty (no aliases), not reset to the default.
+    changes.push(['patient_aliases', (raw ?? '').split(',').map((a) => a.trim()).filter(Boolean).join(',')]);
+  }
   if (input.receiveMode !== undefined) {
     if (!['poll', 'push', 'off'].includes(String(input.receiveMode))) throw new ChannelError('receiveMode is poll, push or off.');
     changes.push(['receive_mode', String(input.receiveMode)]);
@@ -209,8 +223,10 @@ export function saveChannelSettings(body: unknown): ChannelSettings {
     const after = getChannelSettings();
     if (after.enabled && !before.enabled) {
       const last = get<{ id: number | null }>('SELECT MAX(id) AS id FROM messages')?.id ?? 0;
+      const at = new Date().toISOString();
       writeKey('first_message_id', String(last));
-      writeKey('poll_since', new Date().toISOString());
+      writeKey('poll_since', at);
+      writeKey('enabled_at', at);
     }
     db.exec('COMMIT');
   } catch (error) {
@@ -477,6 +493,8 @@ export interface InboundResult {
 /** Stores the care team's Communications in a Bundle (searchset or message) as chat messages. */
 export function receiveBundle(body: unknown, settings = getChannelSettings(), via = 'poll'): InboundResult {
   const result: InboundResult = { stored: 0, duplicates: 0, ignored: 0, rejected: 0, latest: null };
+  // Only what the care team wrote after the channel was turned on.
+  const enabledAt = readKey('enabled_at');
   const json = body as Json | null;
   const resources: Json[] =
     json?.resourceType === 'Bundle'
@@ -492,10 +510,16 @@ export function receiveBundle(body: unknown, settings = getChannelSettings(), vi
       result.ignored += 1;
       continue;
     }
-    const patient = patientOf(c);
-    if (patient !== settings.patientGuid) {
+    // Ours, one of the care team's ids for her, or no subject: stored for our patient.
+    const subject = patientOf(c);
+    if (subject !== null && subject !== settings.patientGuid && !settings.patientAliases.includes(subject)) {
       result.rejected += 1;
-      log('in', 'rejected', `${via}: a Communication for another patient (${patient ?? 'none'}) was ignored.`);
+      log('in', 'rejected', `${via}: a Communication for another patient (${subject}) was ignored.`);
+      continue;
+    }
+    const patient = settings.patientGuid;
+    if (enabledAt && typeof c.sent === 'string' && c.sent < enabledAt) {
+      result.ignored += 1;
       continue;
     }
     const text = textOf(c);
@@ -683,7 +707,7 @@ export function setupCareTeamChannel(app: Express, options: { timers?: boolean }
       id: 0,
       patientGuid: settings.patientGuid,
       sender: 'patient',
-      text: `Test message from MMD (synthetic test data), ${new Date().toISOString()}.`,
+      text: 'Testmeddelande från MMD, syntetisk data',
       serviceRequestGuid: null,
       createdAt: now(),
     };

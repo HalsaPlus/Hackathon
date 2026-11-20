@@ -17,6 +17,7 @@ interface ChannelView {
   healthPath: string;
   pushSecretHint: string | null;
   patientGuid: string;
+  patientAliases: string[];
   payloadFormat: 'r5' | 'r4';
   inboundUrl: string;
 }
@@ -41,6 +42,7 @@ interface FormState {
   pushSecret: string;
   removePushSecret: boolean;
   patientGuid: string;
+  patientAliases: string;
 }
 
 const toForm = (v: ChannelView): FormState => ({
@@ -57,6 +59,7 @@ const toForm = (v: ChannelView): FormState => ({
   pushSecret: '',
   removePushSecret: false,
   patientGuid: v.patientGuid,
+  patientAliases: v.patientAliases.join(', '),
 });
 
 const time = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -102,6 +105,7 @@ export function CareTeamChannelCard() {
         healthPath: form.healthPath,
         pushSecret: form.removePushSecret ? null : form.pushSecret || undefined,
         patientGuid: form.patientGuid,
+        patientAliases: form.patientAliases,
       });
       setData(next);
       setForm(toForm(next.settings));
@@ -254,6 +258,14 @@ export function CareTeamChannelCard() {
         <div className="field">
           <label htmlFor="ct-patient">Patient GUID</label>
           <input id="ct-patient" className="mono" value={form.patientGuid} onChange={(e) => set('patientGuid', e.target.value)} spellCheck={false} />
+        </div>
+        <div className="field">
+          <label htmlFor="ct-aliases">Care team patient aliases</label>
+          <input id="ct-aliases" className="mono" value={form.patientAliases} onChange={(e) => set('patientAliases', e.target.value)} spellCheck={false} />
+          <p className="help">
+            Comma-separated ids the care team's system uses for the same patient. A reply about one of these, or with no patient, is stored for the
+            patient above; any other patient is rejected.
+          </p>
         </div>
         <div className="actions">
           <button type="submit" className="button" disabled={!!busy}>
