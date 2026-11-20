@@ -390,7 +390,10 @@ test('the patient app view has the history, the chat and the IPS', () => {
   assert.ok(app.observations.every((o) => o.patientReported && o.sourceApp === 'MMD'));
   assert.equal(app.messages.filter((m) => m.sender === 'system').length, 1);
   assert.equal(app.ips?.synthetic, true);
-  assert.deepEqual(app.ips?.problems.map((p) => p.name), ['Type 2 diabetes', 'Rheumatoid arthritis', 'ADHD']);
+  assert.deepEqual(app.ips?.problems.map((p) => p.name), ['Type 1 diabetes', 'Rheumatoid arthritis', 'ADHD', 'Recurrent depression, in remission']);
+  assert.deepEqual(app.ips?.medications.map((m) => m.name), ['Insulin degludec', 'Insulin aspart', 'Lisdexamfetamine 50 mg', 'Methotrexate 15 mg']);
+  assert.deepEqual(app.ips?.allergies.map((a) => a.name), ['No known allergies']);
+  assert.equal(app.patient.displayName, 'Andrea Lindqvist');
   assert.equal(app.ips?.results[0].name, 'HbA1c');
 });
 

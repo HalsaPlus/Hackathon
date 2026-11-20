@@ -89,31 +89,50 @@ export function buildDemoIps(patientGuid: string, today: number) {
         subject,
         title: 'International Patient Summary',
       }),
-      entry({ resourceType: 'Condition', id: 'ips-c1', subject, code: { text: 'Type 2 diabetes' }, onsetDateTime: date(2900) }),
+      // As in the case "Arne och Andrea" (Nordic Hackathon 2026), with
+      // rheumatoid arthritis added so that one order carries a third plan.
+      entry({ resourceType: 'Condition', id: 'ips-c1', subject, code: { text: 'Type 1 diabetes' }, onsetDateTime: '2012' }),
       entry({ resourceType: 'Condition', id: 'ips-c2', subject, code: { text: 'Rheumatoid arthritis' }, onsetDateTime: date(1500) }),
-      entry({ resourceType: 'Condition', id: 'ips-c3', subject, code: { text: 'ADHD' }, onsetDateTime: date(4000) }),
+      entry({ resourceType: 'Condition', id: 'ips-c3', subject, code: { text: 'ADHD' }, onsetDateTime: '2015' }),
+      entry({ resourceType: 'Condition', id: 'ips-c4', subject, code: { text: 'Recurrent depression, in remission' } }),
       entry({
         resourceType: 'MedicationStatement',
         id: 'ips-m1',
         subject,
-        medicationCodeableConcept: { text: 'Metformin 500 mg' },
-        dosage: [{ text: '1 tablet twice a day' }],
+        medicationCodeableConcept: { text: 'Insulin degludec' },
+        dosage: [{ text: '26 units every evening' }],
       }),
       entry({
         resourceType: 'MedicationStatement',
         id: 'ips-m2',
         subject,
-        medicationCodeableConcept: { text: 'Methotrexate 15 mg' },
-        dosage: [{ text: 'Once a week' }],
+        medicationCodeableConcept: { text: 'Insulin aspart' },
+        dosage: [{ text: '4–8 units with meals' }],
       }),
       entry({
         resourceType: 'MedicationStatement',
         id: 'ips-m3',
         subject,
-        medicationCodeableConcept: { text: 'Methylphenidate 36 mg' },
+        medicationCodeableConcept: { text: 'Lisdexamfetamine 50 mg' },
         dosage: [{ text: 'Every morning' }],
       }),
-      entry({ resourceType: 'AllergyIntolerance', id: 'ips-a1', patient: subject, code: { text: 'Penicillin' }, criticality: 'low' }),
+      entry({
+        resourceType: 'MedicationStatement',
+        id: 'ips-m4',
+        subject,
+        medicationCodeableConcept: { text: 'Methotrexate 15 mg' },
+        dosage: [{ text: 'Once a week' }],
+      }),
+      // The case reports no allergies; the IPS says so with its own code.
+      entry({
+        resourceType: 'AllergyIntolerance',
+        id: 'ips-a1',
+        patient: subject,
+        code: {
+          coding: [{ system: 'http://hl7.org/fhir/uv/ips/CodeSystem/absent-unknown-uv-ips', code: 'no-known-allergies', display: 'No known allergies' }],
+          text: 'No known allergies',
+        },
+      }),
       entry({
         resourceType: 'Observation',
         id: 'ips-o1',
