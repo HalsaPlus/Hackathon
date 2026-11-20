@@ -45,6 +45,8 @@ export function createMockCareTeam(options: MockOptions = {}) {
   const received: Json[] = [];
   const replies: Json[] = [];
   const pushes: { status: number; at: string }[] = [];
+  /** How many times the replies were fetched (GET Communication), for tests. */
+  const stats = { polls: 0 };
   let next = 1;
   // Unique per mock instance, as a real system's Communication ids would be.
   const instance = Date.now().toString(36);
@@ -78,6 +80,7 @@ export function createMockCareTeam(options: MockOptions = {}) {
 
   app.get('/fhir/Communication', (req, res) => {
     if (!authorized(req)) return res.status(401).json(outcome('security', 'Missing or wrong token.'));
+    stats.polls += 1;
     // Either ?patient=Patient/<id>&_lastUpdated=gt<time>, or (like the real one) ?_since=<time> for all.
     const patient = String(req.query.patient ?? '').replace(/^Patient\//, '');
     const since = String(req.query._since ?? req.query._lastUpdated ?? '').replace(/^gt/, '');
@@ -147,7 +150,7 @@ export function createMockCareTeam(options: MockOptions = {}) {
     });
   });
 
-  return { app, received, replies, pushes };
+  return { app, received, replies, pushes, stats };
 }
 
 /** Starts the mock on a port (0 = any free port); resolves to its base URL and a stop function. */

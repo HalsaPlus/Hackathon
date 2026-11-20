@@ -3,9 +3,76 @@ import type { MessageView } from '../../shared/types.ts';
 
 // The care-team channel in the patient's chat (server/careteam-channel.ts).
 // When the channel is on for this patient: a subtle delivery status under her
-// own messages, the care team member's name on their replies, a fetch from the
-// care team when the chat opens, and a refresh every 5 seconds while it is
-// open. When it is off, nothing here shows and nothing is fetched again.
+// own messages, the care team member's name on their replies, and, only while
+// the Chat screen is open and the page is visible, a fetch from the care team
+// every second followed by a reload of the chat (the server throttles the
+// fetches). The hook is used only by the Chat screen, so leaving it stops the
+// fetching; hiding the page pauses it until the page is visible again. When
+// the channel is off, nothing here shows and nothing is fetched.
+
+export const CHAT_POLL_MS = 1000;
+
+export interface ChatPollerDeps {
+  /** One round: fetch from the care team, then reload the chat. */
+  tick: () => Promise<void>;
+  isVisible: () => boolean;
+  /** Calls back when visibility changes; returns the unsubscribe. */
+  onVisibilityChange: (callback: () => void) => () => void;
+  intervalMs?: number;
+  setTimer?: (callback: () => void, ms: number) => unknown;
+  clearTimer?: (handle: unknown) => void;
+}
+
+/**
+ * Runs `tick` right away and then a second after each round ends, only while
+ * started and visible; never two rounds at once. Hidden: paused at once.
+ * Visible again: a round right away. stop(): no more rounds.
+ */
+export function createChatPoller(deps: ChatPollerDeps) {
+  const interval = deps.intervalMs ?? CHAT_POLL_MS;
+  const setTimer = deps.setTimer ?? ((callback, ms) => setTimeout(callback, ms));
+  const clearTimer = deps.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+  let running = false;
+  let busy = false;
+  let timer: unknown = null;
+  let unsubscribe: (() => void) | null = null;
+
+  const cancel = () => {
+    if (timer !== null) clearTimer(timer);
+    timer = null;
+  };
+  const round = async () => {
+    timer = null;
+    if (!running || busy || !deps.isVisible()) return;
+    busy = true;
+    try {
+      await deps.tick();
+    } catch {
+      // The next round tries again.
+    } finally {
+      busy = false;
+    }
+    if (running && deps.isVisible() && timer === null) timer = setTimer(() => void round(), interval);
+  };
+
+  return {
+    start() {
+      if (running) return;
+      running = true;
+      unsubscribe = deps.onVisibilityChange(() => {
+        if (!deps.isVisible()) cancel();
+        else if (timer === null && !busy) void round();
+      });
+      void round();
+    },
+    stop() {
+      running = false;
+      cancel();
+      unsubscribe?.();
+      unsubscribe = null;
+    },
+  };
+}
 
 interface ChannelState {
   enabled: boolean;
@@ -40,23 +107,31 @@ export function useCareTeamChannel(patientGuid: string, refresh: () => Promise<v
     }
   }, [base]);
 
-  // On opening the chat: fetch from the care team, then keep the chat fresh.
+  // While the Chat screen is open and visible: fetch from the care team every
+  // second, then reload the chat. Unmounting (leaving the screen) stops it.
   useEffect(() => {
     let live = true;
-    let timer: ReturnType<typeof setInterval> | undefined;
+    let poller: ReturnType<typeof createChatPoller> | null = null;
     void (async () => {
       if (!(await load()) || !live) return;
-      await fetch(`${base}/poll`, { method: 'POST', credentials: 'same-origin' }).catch(() => undefined);
-      if (!live) return;
-      await refresh();
-      await load();
-      timer = setInterval(() => {
-        void refresh().then(load);
-      }, 5_000);
+      poller = createChatPoller({
+        tick: async () => {
+          await fetch(`${base}/poll`, { method: 'POST', credentials: 'same-origin' });
+          if (!live) return;
+          await refresh();
+          await load();
+        },
+        isVisible: () => document.visibilityState === 'visible',
+        onVisibilityChange: (callback) => {
+          document.addEventListener('visibilitychange', callback);
+          return () => document.removeEventListener('visibilitychange', callback);
+        },
+      });
+      poller.start();
     })();
     return () => {
       live = false;
-      if (timer) clearInterval(timer);
+      poller?.stop();
     };
   }, [base, load, refresh]);
 
