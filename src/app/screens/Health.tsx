@@ -195,21 +195,6 @@ export function HealthScreen({ view, patientGuid, refresh }: ScreenProps) {
       ) : (
         <Clinical ips={view.ips} onRefresh={() => void refetch()} refreshing={refreshing} message={message} />
       )}
-
-      {mode === 'mine' && praise && (
-        <section className="praise">
-          <span className="mark" style={{ width: 44, height: 44, background: 'var(--bg)' }}>
-            <CheckIcon color="#B6A7FF" size={20} />
-          </span>
-          <span>
-            <span className="small" style={{ fontWeight: 700, letterSpacing: '.06em' }}>
-              CARE TEAM
-            </span>
-            <br />
-            <strong style={{ fontSize: 16 }}>{praise.text}</strong>
-          </span>
-        </section>
-      )}
     </main>
   );
 }

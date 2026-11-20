@@ -282,3 +282,176 @@ test("poll with the real endpoint's search: Communication?_since={since}, replie
   assert.ok(listMessages(ANDREA_GUID).some((m) => m.text === 'Svar om aliaset.' && m.sender === 'care-team'));
   saveChannelSettings({ pollPath: '' });
 });
+
+// --- On-demand polls from the open chat ------------------------------------------------
+
+const { pollOnDemand, resetOnDemandPolling, ON_DEMAND_BACKOFF_MS } = channel;
+const T0 = 1_000_000;
+
+test('on-demand polls: at most one per second across all clients', async () => {
+  saveChannelSettings(OFF);
+  const settings = on({ receiveMode: 'poll' });
+  resetOnDemandPolling();
+  const before = mock.stats.polls;
+  assert.equal((await pollOnDemand(settings, T0)).fresh, true);
+  // Two more clients within the same second get the last result, no new fetch.
+  assert.equal((await pollOnDemand(settings, T0 + 300)).fresh, false);
+  assert.equal((await pollOnDemand(settings, T0 + 999)).fresh, false);
+  assert.equal(mock.stats.polls, before + 1);
+  assert.equal((await pollOnDemand(settings, T0 + 1000)).fresh, true);
+  assert.equal(mock.stats.polls, before + 2);
+});
+
+test('on-demand polls never overlap: while one runs (also the background one), the last result is returned', async () => {
+  const settings = on({ receiveMode: 'poll' });
+  resetOnDemandPolling();
+  const before = mock.stats.polls;
+  const first = pollOnDemand(settings, T0);
+  const second = await pollOnDemand(settings, T0 + 5000); // a second later still, but the first is running
+  assert.equal(second.fresh, false);
+  assert.equal((await first).fresh, true);
+  assert.equal(mock.stats.polls, before + 1);
+
+  const background = pollOnce(settings); // the 30-second poll
+  const during = await pollOnDemand(settings, T0 + 10_000);
+  assert.equal(during.fresh, false);
+  await background;
+  assert.equal(mock.stats.polls, before + 2);
+});
+
+test('on-demand polls back off to 10 s after three failures in a row, until one succeeds', async () => {
+  let settings = on({ receiveMode: 'poll', endpointUrl: 'http://127.0.0.1:9/fhir' });
+  resetOnDemandPolling();
+  for (const t of [0, 1000, 2000]) {
+    const result = await pollOnDemand(settings, T0 + t);
+    assert.equal(result.fresh, true, `fetch at +${t} ms`);
+    assert.ok('error' in result);
+  }
+  // Three failures: now only every 10 s.
+  assert.equal((await pollOnDemand(settings, T0 + 3000)).fresh, false);
+  assert.equal((await pollOnDemand(settings, T0 + 2000 + ON_DEMAND_BACKOFF_MS - 1)).fresh, false);
+  assert.equal((await pollOnDemand(settings, T0 + 2000 + ON_DEMAND_BACKOFF_MS)).fresh, true);
+  // The care team is back: one success, and it is every second again.
+  settings = on({ receiveMode: 'poll' });
+  const back = await pollOnDemand(settings, T0 + 30_000);
+  assert.equal(back.fresh, true);
+  assert.ok(!('error' in back));
+  assert.equal((await pollOnDemand(settings, T0 + 31_000)).fresh, true);
+  resetOnDemandPolling();
+});
+
+test('the app route uses the throttled poll', async () => {
+  on({ receiveMode: 'poll' });
+  resetOnDemandPolling();
+  const before = mock.stats.polls;
+  const results = await Promise.all([1, 2, 3].map(() => fetch(`${mmd}/api/app/${ANDREA_GUID}/careteam/poll`, { method: 'POST' }).then((r) => r.json())));
+  assert.equal(results.filter((r) => r.fresh).length, 1);
+  assert.equal(mock.stats.polls, before + 1);
+  saveChannelSettings(OFF);
+});
+
+// --- The app: only the open, visible Chat screen polls ----------------------------------
+
+const { createChatPoller } = await import('../src/app/careteam.ts');
+
+function fakeChatPoller(visibleAtStart: boolean) {
+  let visible = visibleAtStart;
+  let listener: (() => void) | null = null;
+  const timers = new Map<number, () => void>();
+  let nextId = 1;
+  let ticks = 0;
+  const poller = createChatPoller({
+    tick: async () => {
+      ticks += 1;
+    },
+    isVisible: () => visible,
+    onVisibilityChange: (callback) => {
+      listener = callback;
+      return () => {
+        listener = null;
+      };
+    },
+    setTimer: (callback) => {
+      const id = nextId++;
+      timers.set(id, callback);
+      return id;
+    },
+    clearTimer: (id) => timers.delete(id as number),
+  });
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  return {
+    poller,
+    ticks: () => ticks,
+    pending: () => timers.size,
+    /** Lets the pending one-second timer fire. */
+    async second() {
+      const [id, callback] = [...timers.entries()][0] ?? [];
+      if (id === undefined) return;
+      timers.delete(id);
+      callback();
+      await flush();
+    },
+    async setVisible(value: boolean) {
+      visible = value;
+      listener?.();
+      await flush();
+    },
+    flush,
+    hasListener: () => listener !== null,
+  };
+}
+
+test('the chat poller: polls at once and every second while visible, pauses when hidden, resumes when visible', async () => {
+  const f = fakeChatPoller(true);
+  f.poller.start(); // the Chat screen opens
+  await f.flush();
+  assert.equal(f.ticks(), 1, 'a fetch right away');
+  await f.second();
+  await f.second();
+  assert.equal(f.ticks(), 3, 'one each second');
+
+  await f.setVisible(false); // she switches browser tab or hides the page
+  assert.equal(f.pending(), 0, 'nothing scheduled while hidden');
+  await f.second();
+  assert.equal(f.ticks(), 3);
+
+  await f.setVisible(true); // back
+  assert.equal(f.ticks(), 4, 'a fetch right away when visible again');
+  await f.second();
+  assert.equal(f.ticks(), 5);
+
+  f.poller.stop(); // she leaves the Chat screen (the hook unmounts)
+  assert.equal(f.pending(), 0);
+  assert.equal(f.hasListener(), false);
+  await f.second();
+  assert.equal(f.ticks(), 5, 'no fetch after leaving the chat');
+});
+
+test('the chat poller does nothing while the page is hidden, and starts when it becomes visible', async () => {
+  const f = fakeChatPoller(false);
+  f.poller.start();
+  await f.flush();
+  assert.equal(f.ticks(), 0);
+  assert.equal(f.pending(), 0);
+  await f.setVisible(true);
+  assert.equal(f.ticks(), 1);
+  f.poller.stop();
+});
+
+test('no other screen polls the care team: only the Chat screen uses the channel hook', async () => {
+  const { readdirSync } = await import('node:fs');
+  const root = path.join(import.meta.dirname, '..', 'src');
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.tsx?$/.test(entry.name)) files.push(full);
+    }
+  };
+  walk(root);
+  const users = files.filter((f) => /useCareTeamChannel\(/.test(readFileSync(f, 'utf8')) && !f.endsWith(path.join('app', 'careteam.ts')));
+  assert.deepEqual(users.map((f) => path.relative(root, f).replaceAll('\\', '/')), ['app/screens/Chat.tsx']);
+  const pollers = files.filter((f) => readFileSync(f, 'utf8').includes('/careteam/poll') || readFileSync(f, 'utf8').includes('`${base}/poll`'));
+  assert.deepEqual(pollers.map((f) => path.relative(root, f).replaceAll('\\', '/')), ['app/careteam.ts']);
+});

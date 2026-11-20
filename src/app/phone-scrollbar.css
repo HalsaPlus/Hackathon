@@ -3,7 +3,13 @@
  * phone-scrollbar.ts): a phone's slim scrollbar instead of the desktop one,
  * and its track stops above the tab bar (77px high) on the screens that have
  * one, as on a phone. Screens without a tab bar keep the full track.
+ * The scrollbar's space is always reserved, so the tab bar stays in the same
+ * place whether or not a screen scrolls.
  */
+:root.pf-inside {
+  scrollbar-gutter: stable;
+}
+
 :root.pf-inside::-webkit-scrollbar {
   width: 6px;
   background: transparent;

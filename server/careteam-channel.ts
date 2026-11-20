@@ -581,6 +581,49 @@ export async function pollOnce(settings = getChannelSettings()): Promise<Inbound
   }
 }
 
+// --- On-demand polls from the open chat --------------------------------------------------
+//
+// While the patient has the Chat screen open, the app asks for a fetch every
+// second. Across all clients, at most one fetch starts per second; while one
+// is running (also the 30-second background one) nothing new starts and the
+// last result is returned. After three failed fetches in a row, on-demand
+// fetches wait 10 seconds until one succeeds.
+
+export const ON_DEMAND_INTERVAL_MS = 1000;
+export const ON_DEMAND_BACKOFF_MS = 10_000;
+export const ON_DEMAND_FAILURES_BEFORE_BACKOFF = 3;
+
+type PollResult = InboundResult | { error: string };
+export type OnDemandResult = PollResult & { fresh: boolean };
+
+const onDemand = { lastStartedAt: -Infinity, lastResult: null as PollResult | null, failures: 0, running: false };
+
+/** For tests: forget the on-demand state. */
+export function resetOnDemandPolling() {
+  Object.assign(onDemand, { lastStartedAt: -Infinity, lastResult: null, failures: 0, running: false });
+}
+
+export function onDemandWaitMs() {
+  return onDemand.failures >= ON_DEMAND_FAILURES_BEFORE_BACKOFF ? ON_DEMAND_BACKOFF_MS : ON_DEMAND_INTERVAL_MS;
+}
+
+/** A fetch for the open chat, throttled and never overlapping. `fresh` says whether this call fetched. */
+export async function pollOnDemand(settings = getChannelSettings(), now = Date.now()): Promise<OnDemandResult> {
+  const last = (): OnDemandResult => ({ ...(onDemand.lastResult ?? { stored: 0, duplicates: 0, ignored: 0, rejected: 0, latest: null }), fresh: false });
+  if (onDemand.running || polling) return last();
+  if (now - onDemand.lastStartedAt < onDemandWaitMs()) return last();
+  onDemand.running = true;
+  onDemand.lastStartedAt = now;
+  try {
+    const result = await pollOnce(settings);
+    onDemand.failures = 'error' in result ? onDemand.failures + 1 : 0;
+    onDemand.lastResult = result;
+    return { ...result, fresh: true };
+  } finally {
+    onDemand.running = false;
+  }
+}
+
 // --- Views for the app and the admin console -------------------------------------------
 
 /** Per message: delivery status (the patient's) and sender name (the care team's). */
@@ -737,8 +780,9 @@ export function setupCareTeamChannel(app: Express, options: { timers?: boolean }
   app.post('/api/app/:patient/careteam/poll', async (req, res) => {
     const settings = getChannelSettings();
     if (!settings.enabled || settings.patientGuid !== String(req.params.patient)) return res.json({ skipped: true });
+    // The outbox has its own guard; a fetch from the care team is throttled (pollOnDemand).
     await sendPending(settings);
-    res.json(settings.receiveMode === 'poll' ? await pollOnce(settings) : { skipped: true });
+    res.json(settings.receiveMode === 'poll' ? await pollOnDemand(settings) : { skipped: true });
   });
 
   if (options.timers !== false) {
