@@ -19,6 +19,8 @@ interface ChannelView {
   patientGuid: string;
   patientAliases: string[];
   payloadFormat: 'r5' | 'r4';
+  valuesUrl: string;
+  valuesTarget: 'careteam' | 'pdhc';
   inboundUrl: string;
 }
 
@@ -43,6 +45,8 @@ interface FormState {
   removePushSecret: boolean;
   patientGuid: string;
   patientAliases: string;
+  valuesUrl: string;
+  valuesTarget: 'careteam' | 'pdhc';
 }
 
 const toForm = (v: ChannelView): FormState => ({
@@ -60,6 +64,8 @@ const toForm = (v: ChannelView): FormState => ({
   removePushSecret: false,
   patientGuid: v.patientGuid,
   patientAliases: v.patientAliases.join(', '),
+  valuesUrl: v.valuesUrl,
+  valuesTarget: v.valuesTarget,
 });
 
 const time = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -106,6 +112,8 @@ export function CareTeamChannelCard() {
         pushSecret: form.removePushSecret ? null : form.pushSecret || undefined,
         patientGuid: form.patientGuid,
         patientAliases: form.patientAliases,
+        valuesUrl: form.valuesUrl,
+        valuesTarget: form.valuesTarget,
       });
       setData(next);
       setForm(toForm(next.settings));
@@ -251,6 +259,23 @@ export function CareTeamChannelCard() {
                 Remove the push secret
               </label>
             )}
+          </div>
+        )}
+        <div className="field">
+          <label htmlFor="ct-values-target">Reported values go to</label>
+          <select id="ct-values-target" value={form.valuesTarget} onChange={(e) => set('valuesTarget', e.target.value as FormState['valuesTarget'])}>
+            <option value="careteam">The care team's system (values URL below)</option>
+            <option value="pdhc">PDHC's gateway, as before</option>
+          </select>
+        </div>
+        {form.valuesTarget === 'careteam' && (
+          <div className="field">
+            <label htmlFor="ct-values-url">Values URL</label>
+            <input id="ct-values-url" className="mono" value={form.valuesUrl} onChange={(e) => set('valuesUrl', e.target.value)} inputMode="url" spellCheck={false} />
+            <p className="help">
+              The patient's values are POSTed here as a FHIR Bundle of type transaction, one Observation each, with the token and auth header above.
+              Empty resets it to the default.
+            </p>
           </div>
         )}
         <div className="field">

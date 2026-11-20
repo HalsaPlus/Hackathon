@@ -31,7 +31,7 @@ import { addMessage, isClosed, type ServiceRequestRow } from './store.ts';
 // token and the push secret never reach the browser or the log.
 
 export const ANDREA_GUID = '28a29239-6424-48e7-a123-9d9e863670b8';
-const ANDREA_IDENTIFIER = { system: 'urn:oid:1.2.752.129.2.1.3.1', value: '200207252388' };
+export const ANDREA_IDENTIFIER = { system: 'urn:oid:1.2.752.129.2.1.3.1', value: '200207252388' };
 const ANDREA_BIRTH_DATE = '2002-07-25';
 const DEFAULT_PUBLIC_URL = 'https://mmd-hackathon.onrender.com';
 const TIMEOUT_MS = 15_000;
@@ -48,10 +48,15 @@ export const DEFAULTS = {
   /** The care team's own id for the same patient (Casper's demo patient GUID). */
   patientAliases: 'a7d3c1e2-5b4f-4c6a-9e8d-2f1b0c3d4e51',
   payloadFormat: 'r5' as PayloadFormat,
+  /** Where the patient's reported values go (server/careteam-values.ts): a FHIR transaction Bundle of Observations. */
+  valuesUrl: 'https://nordic-hackathon-2026.onrender.com/api/mmd',
+  valuesTarget: 'careteam' as ValuesTarget,
 };
 
 export type ReceiveMode = 'poll' | 'push' | 'off';
 export type PayloadFormat = 'r5' | 'r4';
+/** Who gets the patient's reported values: the care team's system, or gateway.pdhc as before. */
+export type ValuesTarget = 'careteam' | 'pdhc';
 
 export interface ChannelSettings {
   enabled: boolean;
@@ -67,6 +72,9 @@ export interface ChannelSettings {
   /** Other ids the care team's system may use for the same patient; their Communications are stored for patientGuid. */
   patientAliases: string[];
   payloadFormat: PayloadFormat;
+  /** Where reported values are POSTed, with the same token and auth header. */
+  valuesUrl: string;
+  valuesTarget: ValuesTarget;
 }
 
 /** What the admin console sees: no secrets, only their last four characters. */
@@ -142,6 +150,8 @@ export function getChannelSettings(): ChannelSettings {
       .map((alias) => alias.trim())
       .filter(Boolean),
     payloadFormat: format === 'r4' ? 'r4' : 'r5',
+    valuesUrl: readKey('values_url') ?? DEFAULTS.valuesUrl,
+    valuesTarget: readKey('values_target') === 'pdhc' ? 'pdhc' : DEFAULTS.valuesTarget,
   };
 }
 
@@ -153,15 +163,15 @@ export function toChannelView(settings = getChannelSettings()): ChannelSettingsV
   return { ...rest, tokenHint: hint(token), pushSecretHint: hint(pushSecret), inboundUrl: `${base.replace(/\/+$/, '')}/api/v1/inbound/message` };
 }
 
-function cleanUrl(value: string) {
+function cleanUrl(value: string, label = 'The endpoint URL') {
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new ChannelError('The endpoint URL is not a valid address.');
+    throw new ChannelError(`${label} is not a valid address.`);
   }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new ChannelError('The endpoint URL must start with https:// (or http:// for a local test).');
-  if (url.username || url.password) throw new ChannelError('The endpoint URL must not contain a user name or password.');
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new ChannelError(`${label} must start with https:// (or http:// for a local test).`);
+  if (url.username || url.password) throw new ChannelError(`${label} must not contain a user name or password.`);
   url.hash = '';
   return url.toString().replace(/\/+$/, '');
 }
@@ -186,6 +196,12 @@ export function saveChannelSettings(body: unknown): ChannelSettings {
 
   const endpointUrl = text('endpointUrl', 2048);
   if (endpointUrl !== undefined) changes.push(['endpoint_url', endpointUrl ? cleanUrl(endpointUrl) : null]);
+  const valuesUrl = text('valuesUrl', 2048);
+  if (valuesUrl !== undefined) changes.push(['values_url', valuesUrl ? cleanUrl(valuesUrl, 'The values URL') : null]);
+  if (input.valuesTarget !== undefined) {
+    if (!['careteam', 'pdhc'].includes(String(input.valuesTarget))) throw new ChannelError('valuesTarget is careteam or pdhc.');
+    changes.push(['values_target', String(input.valuesTarget)]);
+  }
   for (const [field, key] of [
     ['token', 'token'],
     ['pushSecret', 'push_secret'],
@@ -242,7 +258,7 @@ export function saveChannelSettings(body: unknown): ChannelSettings {
   return getChannelSettings();
 }
 
-function log(direction: 'out' | 'in' | 'test', outcome: string, detail: string | null) {
+export function log(direction: 'out' | 'in' | 'test' | 'values', outcome: string, detail: string | null) {
   run('INSERT INTO careteam_log (at, direction, outcome, detail) VALUES (:at, :direction, :outcome, :detail)', {
     at: now(),
     direction,
@@ -272,7 +288,7 @@ export function authHeaders(settings: ChannelSettings): Record<string, string> {
   return { [name]: template.includes('{token}') ? template.replace('{token}', settings.token) : `${template} ${settings.token}`.trim() };
 }
 
-async function request(settings: ChannelSettings, method: 'GET' | 'POST', url: string, body?: unknown) {
+export async function request(settings: ChannelSettings, method: 'GET' | 'POST', url: string, body?: unknown) {
   return fetch(url, {
     method,
     headers: {
@@ -287,7 +303,7 @@ async function request(settings: ChannelSettings, method: 'GET' | 'POST', url: s
 }
 
 /** Their answer, short and without anything that could be a secret we sent. */
-async function shortAnswer(response: globalThis.Response, settings: ChannelSettings) {
+export async function shortAnswer(response: globalThis.Response, settings: ChannelSettings) {
   let text = (await response.text().catch(() => '')).slice(0, 300);
   for (const secret of [settings.token, settings.pushSecret]) if (secret) text = text.split(secret).join('[secret]');
   return text.replace(/\s+/g, ' ').trim();
