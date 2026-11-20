@@ -30,6 +30,13 @@ import type { AddressInfo } from 'node:net';
 const ANDREA_GUID = '28a29239-6424-48e7-a123-9d9e863670b8';
 
 export interface MockOptions {
+  /**
+   * Whether what MMD sends shows up in GET Communication, as in a real
+   * care-team system: with the id the mock answered ('remote-id'), with
+   * MMD's own Communication id ('own-id'), or with an id of its own
+   * ('new-id'). Default: not at all.
+   */
+  echo?: 'remote-id' | 'own-id' | 'new-id';
   token?: string;
   patientGuid?: string;
   format?: 'r5' | 'r4';
@@ -70,6 +77,13 @@ export function createMockCareTeam(options: MockOptions = {}) {
     }
     received.push(bundle);
     const id = `mock-received-${received.length}`;
+    const sent = bundle.entry.find((e: Json) => e.resource?.resourceType === 'Communication')?.resource;
+    if (options.echo && sent) {
+      const echoed = JSON.parse(JSON.stringify(sent));
+      echoed.id = options.echo === 'remote-id' ? id : options.echo === 'new-id' ? `mock-echo-${instance}-${next++}` : sent.id;
+      echoed.meta = { ...(echoed.meta ?? {}), lastUpdated: new Date().toISOString() };
+      replies.push(echoed);
+    }
     res.status(200).json({
       resourceType: 'Bundle',
       id,

@@ -112,7 +112,12 @@ test('outbound: only messages written after the channel was turned on are delive
   assert.match(deliveryOf(message.id)!.remote_id!, /^mock-received-/);
   for (const m of [older, careTeam, other]) assert.equal(deliveryOf(m.id), undefined);
   assert.equal(await sendPending(), 0, 'not sent twice');
+  // Poll mode: shown as pending until it is back from the care team's system
+  // (server/careteam-master.test.ts); send-only: sent once delivered.
+  assert.equal(chatStatus(ANDREA_GUID).deliveries[message.id].status, 'pending');
+  saveChannelSettings({ receiveMode: 'off' });
   assert.equal(chatStatus(ANDREA_GUID).deliveries[message.id].status, 'delivered');
+  saveChannelSettings({ receiveMode: 'poll' });
 });
 
 test('outbound: a 4xx answer and a network error are kept as failed', async () => {
