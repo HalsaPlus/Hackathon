@@ -83,7 +83,10 @@ export function ChatScreen({ view, patientGuid, refresh, today }: ScreenProps) {
                 ) : (
                   <div className={`bubble ${m.sender === 'patient' ? 'me' : 'them'}`}>
                     {m.text}
-                    <span className="bubble-time">{formatClock(m.createdAt)}</span>
+                    <span className="bubble-time">
+                      {m.via ? `via ${m.via} · ` : ''}
+                      {formatClock(m.createdAt)}
+                    </span>
                   </div>
                 )}
               </div>

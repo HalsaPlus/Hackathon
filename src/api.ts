@@ -1,6 +1,9 @@
 import type {
+  AssistantLinkView,
   ConnectionView,
   InboundLogEntry,
+  MessageView,
+  NewAssistantLink,
   PatientSummary,
   PatientView,
   ServiceSettingsView,
@@ -60,6 +63,15 @@ export const api = {
   sendTestReport: (id: number, onePerReport: boolean) =>
     call<TestReportResult[]>('POST', `/api/connections/${id}/test-report`, { onePerReport }),
   inboundLog: () => call<InboundLogEntry[]>('GET', '/api/inbound-log'),
+
+  messages: (patientGuid: string) => call<MessageView[]>('GET', `/api/patients/${encodeURIComponent(patientGuid)}/messages`),
+  replyToPatient: (patientGuid: string, text: string) =>
+    call<MessageView>('POST', `/api/patients/${encodeURIComponent(patientGuid)}/messages`, { text }),
+  assistantLinks: (patientGuid: string) =>
+    call<AssistantLinkView[]>('GET', `/api/patients/${encodeURIComponent(patientGuid)}/assistant-links`),
+  createAssistantLink: (patientGuid: string, label: string) =>
+    call<NewAssistantLink>('POST', `/api/patients/${encodeURIComponent(patientGuid)}/assistant-links`, { label }),
+  revokeAssistantLink: (id: number) => call<void>('POST', `/api/assistant-links/${id}/revoke`),
 
   settings: () => call<ServiceSettingsView>('GET', '/api/settings'),
   saveSettings: (input: ServiceSettingsInput) => call<ServiceSettingsView>('PUT', '/api/settings', input),

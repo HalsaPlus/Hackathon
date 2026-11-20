@@ -23,6 +23,8 @@ export interface ChatMessage {
   text: string;
   serviceRequestGuid: string | null;
   createdAt: string;
+  /** The AI assistant the patient wrote through ("ChatGPT"), if any. */
+  via?: string | null;
 }
 
 export function toCommunication(message: ChatMessage) {
@@ -50,6 +52,7 @@ export function toCommunication(message: ChatMessage) {
     sent: message.createdAt,
     // FHIR R5 has no contentString; plain text goes in contentCodeableConcept.text.
     payload: [{ contentCodeableConcept: { text: message.text } }],
+    ...(message.via ? { note: [{ text: `Written by the patient through ${message.via} (an AI assistant).` }] } : {}),
   };
 }
 
