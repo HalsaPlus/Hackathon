@@ -1,0 +1,24 @@
+/*
+ * The patient app inside Casper's /phone (marked html.pf-inside by
+ * phone-scrollbar.ts): a phone's slim scrollbar instead of the desktop one,
+ * and its track stops above the tab bar (77px high) on the screens that have
+ * one, as on a phone. Screens without a tab bar keep the full track.
+ */
+:root.pf-inside::-webkit-scrollbar {
+  width: 6px;
+  background: transparent;
+}
+
+:root.pf-inside::-webkit-scrollbar-track {
+  margin: 6px 0;
+  background: transparent;
+}
+
+:root.pf-inside:has(.tabbar)::-webkit-scrollbar-track {
+  margin-bottom: 82px;
+}
+
+:root.pf-inside::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.35);
+}

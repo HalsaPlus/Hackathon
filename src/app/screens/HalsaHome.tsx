@@ -3,6 +3,10 @@ import { HALSA_SERIES, type HalsaOverview, type HalsaPoint, type HalsaVaccinatio
 import figure from '../assets/halsa-figure.png';
 import type { HalsaLoad } from '../halsa.ts';
 import { formatClock, formatShort } from '../model.ts';
+// The slim scrollbar inside Casper's /phone. Imported here because the app
+// always loads this file (App → Health → HalsaData → HalsaHome) and the server
+// tests never do (they cannot load CSS).
+import '../phone-scrollbar.ts';
 import { Sparkline } from './Health.tsx';
 
 // The Hälsa+ home for a linked patient: the Health score and the dotted body
