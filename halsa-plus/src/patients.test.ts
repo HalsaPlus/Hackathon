@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -145,7 +146,12 @@ test('POST /observations checks the input', async () => {
   for (const [body, code] of [
     [{ type: 'crp', value: 3 }, 'invalid_type'],
     [{ type: 'stress', value: 11 }, 'invalid_value'],
+    [{ type: 'stress', value: 8 }, 'invalid_value'],
+    [{ type: 'anxiety', value: 0 }, 'invalid_value'],
+    [{ type: 'mood', value: 0 }, 'invalid_value'],
+    [{ type: 'depression', value: 7.5 }, 'invalid_value'],
     [{ type: 'stress', value: 2.5 }, 'invalid_value'],
+    [{ type: 'steps', value: 4000 }, 'invalid_type'],
     [{ type: 'anxiety', value: 3, effectiveDateTime: '2026-11-25T08:00:00Z' }, 'invalid_time'],
     [{ type: 'blood-pressure', components: [{ code: 'systolic', value: 120 }] }, 'invalid_value'],
   ] as const) {
@@ -159,6 +165,11 @@ test('POST /observations checks the input', async () => {
   });
   assert.equal(bp.status, 201);
   assert.equal(bp.body.effectiveDateTime, '2026-11-19T12:00:00Z', 'defaults to the demo clock');
+  for (const [type, value] of [['energy', 1], ['mood', 7], ['stress', 4], ['anxiety', 2], ['depression', 3]] as const) {
+    const rating = await api.call(ANDREA_TOKEN, 'POST', '/api/v1/observations', { type, value });
+    assert.equal(rating.status, 201, type);
+    assert.deepEqual([rating.body.type, rating.body.value, rating.body.unit, rating.body.sourceType], [type, value, '1–7', 'patient-reported']);
+  }
   await api.stop();
   database.close();
 });
@@ -178,5 +189,44 @@ test('CLI: patient:create and token:create add a patient whose token works', asy
   const api = await start(database);
   assert.equal((await api.call(token, 'GET', '/api/v1/me')).body.id, guid);
   await api.stop();
+  database.close();
+});
+
+test('a database from the previous version is migrated: new types allowed, generated data redone, entered values kept', () => {
+  const file = tempDb();
+  // The previous schema: only seven types, and seed_state without data_version.
+  const old = new DatabaseSync(file);
+  old.exec(`
+    CREATE TABLE patients (guid TEXT PRIMARY KEY, name TEXT NOT NULL, personal_identity_number TEXT UNIQUE, birth_date TEXT,
+      identifier_system TEXT, gender TEXT, height_cm REAL, created_at TEXT NOT NULL);
+    CREATE TABLE observations (
+      patient_guid TEXT NOT NULL REFERENCES patients(guid) ON DELETE CASCADE, id TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('blood-pressure', 'glucose', 'sleep', 'anxiety', 'stress', 'bmi', 'crp')),
+      source TEXT NOT NULL CHECK (source IN ('generated', 'patient-entered', 'external-lab')),
+      source_type TEXT NOT NULL CHECK (source_type IN ('device', 'patient-reported', 'external-lab')),
+      device_id TEXT, available_at INTEGER NOT NULL, effective_date_time TEXT, period_start TEXT, period_end TEXT, issued TEXT,
+      value REAL, comparator TEXT, unit TEXT, components_json TEXT, performer_json TEXT, created_at TEXT NOT NULL,
+      PRIMARY KEY (patient_guid, id));
+    CREATE TABLE seed_state (patient_guid TEXT PRIMARY KEY, seeded_until INTEGER NOT NULL, updated_at TEXT NOT NULL);
+    INSERT INTO patients VALUES ('${ANDREA.guid}', 'Andrea Lindqvist', '200207252388', '2002-07-25', 'urn:oid:1.2.752.129.2.1.3.1', 'female', 168, 'x');
+    INSERT INTO observations (patient_guid, id, type, source, source_type, available_at, effective_date_time, value, unit, created_at)
+      VALUES ('${ANDREA.guid}', 'stress-old-generated', 'stress', 'generated', 'patient-reported', 1, '2026-03-02T20:00:00Z', 9, '0–10', 'x'),
+             ('${ANDREA.guid}', 'anxiety-entered-earlier', 'anxiety', 'patient-entered', 'patient-reported', 2, '2026-11-18T20:00:00Z', 9, '0–10', 'x');
+    INSERT INTO seed_state VALUES ('${ANDREA.guid}', 9999999999999, 'x');
+  `);
+  old.close();
+
+  const database = openDatabase(file);
+  assert.ok(seedAndrea(database, '2026-11-19').inserted > 20_000, 'the generated data is loaded again');
+  const kept = database
+    .all<{ id: string }>("SELECT id FROM observations WHERE id IN ('stress-old-generated', 'anxiety-entered-earlier')")
+    .map((r) => r.id);
+  assert.deepEqual(kept, ['anxiety-entered-earlier'], 'old generated rows are replaced, entered values kept as entered');
+  const counts = database.all<{ type: string; n: number }>('SELECT type, COUNT(*) AS n FROM observations GROUP BY type');
+  for (const type of ['steps', 'energy', 'mood', 'depression']) assert.ok(counts.find((c) => c.type === type)!.n > 0, type);
+  const stress = database.all<{ value: number }>("SELECT value FROM observations WHERE type = 'stress' AND source = 'generated'");
+  assert.ok(stress.length > 0 && stress.every((r) => r.value >= 1 && r.value <= 7));
+  // The next start does nothing.
+  assert.equal(seedAndrea(database, '2026-11-19').inserted, 0);
   database.close();
 });

@@ -2,18 +2,41 @@
   "asOf": "2026-11-15T22:59:00Z",
   "items": [
     {
-      "id": "sleep-20261113T071500Z",
+      "id": "sleep-20261113T074300Z",
       "type": "sleep",
       "sourceType": "device",
       "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
       "effectivePeriod": {
-        "start": "2026-11-12T23:17:00Z",
-        "end": "2026-11-13T07:15:00Z"
+        "start": "2026-11-13T00:11:00Z",
+        "end": "2026-11-13T07:43:00Z"
       },
       "components": [
         {
           "code": "sleep-duration",
-          "value": 461,
+          "value": 424,
+          "unit": "min"
+        },
+        {
+          "code": "awakenings",
+          "value": 4,
+          "unit": "count"
+        }
+      ],
+      "status": "final"
+    },
+    {
+      "id": "sleep-20261114T071600Z",
+      "type": "sleep",
+      "sourceType": "device",
+      "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
+      "effectivePeriod": {
+        "start": "2026-11-13T23:56:00Z",
+        "end": "2026-11-14T07:16:00Z"
+      },
+      "components": [
+        {
+          "code": "sleep-duration",
+          "value": 403,
           "unit": "min"
         },
         {
@@ -25,46 +48,23 @@
       "status": "final"
     },
     {
-      "id": "sleep-20261114T064700Z",
+      "id": "sleep-20261115T065500Z",
       "type": "sleep",
       "sourceType": "device",
       "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
       "effectivePeriod": {
-        "start": "2026-11-13T23:02:00Z",
-        "end": "2026-11-14T06:47:00Z"
+        "start": "2026-11-14T23:38:00Z",
+        "end": "2026-11-15T06:55:00Z"
       },
       "components": [
         {
           "code": "sleep-duration",
-          "value": 439,
+          "value": 406,
           "unit": "min"
         },
         {
           "code": "awakenings",
-          "value": 2,
-          "unit": "count"
-        }
-      ],
-      "status": "final"
-    },
-    {
-      "id": "sleep-20261115T062500Z",
-      "type": "sleep",
-      "sourceType": "device",
-      "deviceId": "9aadb89f-7c71-5a8a-bb38-f32fceb26615",
-      "effectivePeriod": {
-        "start": "2026-11-14T22:44:00Z",
-        "end": "2026-11-15T06:25:00Z"
-      },
-      "components": [
-        {
-          "code": "sleep-duration",
-          "value": 441,
-          "unit": "min"
-        },
-        {
-          "code": "awakenings",
-          "value": 3,
+          "value": 4,
           "unit": "count"
         }
       ],

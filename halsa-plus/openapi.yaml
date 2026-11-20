@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Hälsa+ demo API (simulated)
-  version: 0.2.0
+  version: 0.3.0
   summary: A simulated Hälsa+ backend. One synthetic patient for now, Andrea Lindqvist; more can be added.
   description: |
     **ALL DATA IS SYNTHETIC TEST DATA.** Andrea Lindqvist is a fictional patient from the
@@ -12,11 +12,20 @@ info:
     her own initiative (Laboratoire Belvasse in Paris, fictional; invented for the demo).
 
     ## Rules for content
-    - **No clinical interpretation.** There are no scores, no high/low/normal flags, no
-      colours, no reference ranges and no thresholds. The API returns values, units, times,
-      devices and sources only.
-    - **No descriptive statistics** (mean, min, max). BMI is a plain calculation from weight
-      and height and carries no category.
+    - **Observations carry no interpretation.** `/observations`, `/observations/latest` and
+      `format=fhir` return values, units, times, devices and sources only: no flags, no
+      colours, no reference ranges.
+    - **The one exception is `GET /api/v1/overview`**, a demo of the Hälsa+ home screen: it
+      scores six body categories against **demo reference ranges that are made up for the
+      demo** and are not clinical reference intervals. This is a demo of future possibilities,
+      not a regulated product.
+    - BMI is a plain calculation from weight and height and carries no category.
+
+    ## Self-ratings (1–7)
+    Andrea rates `energy`, `mood`, `stress`, `anxiety` (daily) and `depression` (weekly) in
+    the Hälsa+ app on a **1–7** scale. Anchors: for `stress`, `anxiety` and `depression`
+    1 = not at all … 7 = very much; for `energy` and `mood` 1 = very low … 7 = very high.
+    The ratings are **not** a validated instrument.
 
     ## Time window and the demo clock (`asOf`)
     Data exists from **2026-03-01 00:00 Europe/Paris** to **28 days after the day the server
@@ -202,11 +211,11 @@ paths:
         The value is stored, gets `sourceType: patient-reported` and the
         patient's Hälsa+ app as `deviceId`, and is returned by the GET endpoints from then on.
 
-        Types: `anxiety`, `stress` (integer 0–10), `glucose` (mmol/L), `blood-pressure`
+        Types: `energy`, `mood`, `stress`, `anxiety`, `depression` (integer 1–7), `glucose` (mmol/L), `blood-pressure`
         (components `systolic`, `diastolic`, optional `pulse`), `bmi` (component `weight` in
         kg; BMI is calculated with the height in the profile) and `sleep` (`effectivePeriod`,
         component `sleep-duration` in minutes, optional `awakenings`). `crp` cannot be entered;
-        it comes only from a lab.
+        it comes only from a lab, and `steps` only from the smartwatch.
 
         The time defaults to the demo clock (`asOf`, `DEMO_NOW` or the real time) and may not
         be later than it. The input limits only catch typing errors; they say nothing about
@@ -253,6 +262,65 @@ paths:
               schema: { $ref: '#/components/schemas/ObservationList' }
               examples:
                 latest: { externalValue: examples/observations-latest.json }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/vaccinations:
+    get:
+      tags: [patient]
+      operationId: listVaccinations
+      summary: The patient's vaccinations (a short synthetic history)
+      description: |
+        SYNTHETIC TEST DATA. Summarised: the Swedish childhood programme as a few entries, HPV
+        in school, seasonal influenza 2025, a COVID-19 booster and hepatitis A/B before the move
+        to Paris. Every clinic name is fictional.
+      responses:
+        '200':
+          description: The vaccinations, oldest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VaccinationList' }
+              examples:
+                andrea: { externalValue: examples/vaccinations.json }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/overview:
+    get:
+      tags: [observations]
+      operationId: healthOverview
+      summary: Health score and six body categories, like the Hälsa+ home screen (DEMO ranges)
+      description: |
+        **The reference ranges are demo values made up for the demo**, not clinical
+        reference intervals.
+
+        | Category | Types | Demo range |
+        |---|---|---|
+        | Lungs | none yet (oxygen saturation, peak flow) | – |
+        | Liver | none yet (ALT, GGT) | – |
+        | Hormones | `glucose` | 3.9–10.0 mmol/L |
+        | Heart | `blood-pressure` | systolic 90–130 and diastolic 60–85 mmHg |
+        | Urinary tract | none yet (creatinine, urine test) | – |
+        | Mental health | `sleep`, `energy`, `mood`, `stress`, `anxiety`, `depression` | sleep 6–9 h (360–540 min); energy, mood 4–7; stress, anxiety, depression 1–4 |
+
+        - **Score of a category:** the share (%, rounded) of the patient's values in the 14 days
+          before `asOf` that lie within range, counting every value (every CGM reading). A blood
+          pressure reading counts as within range only if both systolic and diastolic are.
+          No values in the window gives `score: null`.
+        - **`healthScore`:** the mean (rounded) of the categories that have a score.
+        - **`available` / `total`:** how many of the category's measures have any value at
+          `asOf`, of how many. Measures Hälsa+ has no source for are listed with
+          `type: null` so the app can show "No data available".
+        - **`latest`:** each measure's latest observation at `asOf`, as `/observations` returns it.
+      parameters:
+        - $ref: '#/components/parameters/asOf'
+      responses:
+        '200':
+          description: The overview.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Overview' }
+              examples:
+                overview: { externalValue: examples/overview.json }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
@@ -438,7 +506,7 @@ components:
 
     ObservationType:
       type: string
-      enum: [blood-pressure, glucose, sleep, anxiety, stress, bmi, crp]
+      enum: [blood-pressure, glucose, sleep, steps, energy, mood, stress, anxiety, depression, bmi, crp]
 
     ObservationPage:
       type: object
@@ -470,11 +538,12 @@ components:
         | `blood-pressure` | components `systolic`, `diastolic` (mmHg), optional `pulse` (/min) | `effectiveDateTime` | blood pressure monitor |
         | `bmi` | `value` kg/m²; components `weight` (kg) and `height` (cm) it is calculated from | `effectiveDateTime` | scale |
         | `sleep` | components `sleep-duration` (min), `awakenings` (count) | `effectivePeriod` = bedtime to wake time | smartwatch |
-        | `anxiety`, `stress` | `value` integer 0–10, unit `0–10` | `effectiveDateTime` = when she entered it | Hälsa+ app (patient-reported) |
+        | `steps` | `value` steps that day, unit `steps` | `effectiveDateTime` = the day's last sync (23:30 Paris) | smartwatch |
+        | `energy`, `mood`, `stress`, `anxiety`, `depression` | `value` integer 1–7, unit `1–7` | `effectiveDateTime` = when she entered it | Hälsa+ app (patient-reported) |
         | `crp` | `value` mg/L, optional `comparator` | `effectiveDateTime` = sample time, `issued` | external lab she visits on her own initiative (`performer`) |
 
-        The self-ratings are Andrea's own 0–10 ratings in the app. They are **not** a validated
-        instrument.
+        The self-ratings are Andrea's own 1–7 ratings in the app (anchors under "Self-ratings"
+        above). They are **not** a validated instrument.
       required: [id, type, status, sourceType, deviceId]
       properties:
         id: { type: string, description: 'Stable across restarts, for example glucose-20260824T172200Z.' }
@@ -513,7 +582,7 @@ components:
       description: What the patient enters. Which fields are needed depends on `type` (see POST /api/v1/observations).
       required: [type]
       properties:
-        type: { type: string, enum: [anxiety, stress, glucose, blood-pressure, bmi, sleep] }
+        type: { type: string, enum: [energy, mood, stress, anxiety, depression, glucose, blood-pressure, bmi, sleep] }
         effectiveDateTime: { type: string, format: date-time, description: Default the demo clock. Not for `sleep`. }
         effectivePeriod:
           type: object
@@ -522,7 +591,7 @@ components:
           properties:
             start: { type: string, format: date-time }
             end: { type: string, format: date-time }
-        value: { type: number, description: For `anxiety`/`stress` (integer 0–10) and `glucose` (mmol/L). }
+        value: { type: number, description: For the self-ratings (integer 1–7) and `glucose` (mmol/L). }
         components:
           type: array
           description: For `blood-pressure` (systolic, diastolic, pulse), `bmi` (weight in kg) and `sleep` (sleep-duration in min, awakenings).
@@ -600,6 +669,76 @@ components:
         status: { type: string, enum: [pending, accepted, declined] }
         receivedAt: { type: string, format: date-time }
 
+    VaccinationList:
+      type: object
+      required: [synthetic, items]
+      properties:
+        synthetic: { const: true }
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, vaccine, against, date, dose, givenAt]
+            properties:
+              id: { type: string }
+              vaccine: { type: string, example: HPV }
+              against: { type: string, description: What it protects against, in plain words. }
+              date: { type: string, format: date }
+              dose: { type: string, example: Dose 1 of 3 }
+              givenAt: { type: string, description: Clinic name. Always fictional. }
+
+    Overview:
+      type: object
+      required: [asOf, window, demoRanges, synthetic, healthScore, categories]
+      properties:
+        asOf: { type: string, format: date-time }
+        window:
+          type: object
+          properties:
+            from: { type: string, format: date-time }
+            to: { type: string, format: date-time }
+            days: { type: integer, example: 14 }
+        demoRanges: { const: true, description: The ranges are demo values, not clinical reference intervals. }
+        synthetic: { const: true }
+        healthScore: { type: [integer, 'null'], description: Mean of the categories that have a score, in %. }
+        categories:
+          type: array
+          items: { $ref: '#/components/schemas/OverviewCategory' }
+
+    OverviewCategory:
+      type: object
+      required: [id, name, score, available, total, measures]
+      properties:
+        id: { type: string, enum: [lungs, liver, hormones, heart, urinary-tract, mental-health] }
+        name: { type: string, example: Mental health }
+        score: { type: [integer, 'null'], description: '% of the values in the window within the demo range; null without values.' }
+        available: { type: integer, description: Measures with any value at asOf. }
+        total: { type: integer, description: Measures in the category. }
+        valuesInWindow: { type: integer }
+        valuesInRange: { type: integer }
+        measures:
+          type: array
+          items:
+            type: object
+            required: [id, name, type, available, latest]
+            properties:
+              id: { type: string, example: sleep }
+              name: { type: string, example: Sleep }
+              type: { oneOf: [{ $ref: '#/components/schemas/ObservationType' }, { type: 'null' }], description: null for a measure Hälsa+ has no source for. }
+              available: { type: boolean }
+              demoRanges:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    component: { type: string }
+                    low: { type: number }
+                    high: { type: number }
+                    unit: { type: string }
+              valuesInWindow: { type: integer }
+              valuesInRange: { type: integer }
+              latest: { oneOf: [{ $ref: '#/components/schemas/Observation' }, { type: 'null' }] }
+
     ConsentInput:
       type: object
       required: [decision]
@@ -639,10 +778,10 @@ components:
         | blood-pressure | vital-signs | LOINC 85354-9 Blood pressure panel | 8480-6 systolic, 8462-4 diastolic (mm[Hg]); 8867-4 heart rate (/min) |
         | bmi | vital-signs | LOINC 39156-5 Body mass index | valueQuantity kg/m2; components 29463-7 body weight (kg), 8302-2 body height (cm) |
         | sleep | activity | local `sleep-night` | 93832-4 Sleep duration (min); local `awakenings` ({count}); effectivePeriod |
-        | anxiety | survey | local `anxiety-self-rating` | valueInteger 0–10 |
-        | stress | survey | local `stress-self-rating` | valueInteger 0–10 |
+        | steps | activity | LOINC 41950-7 Number of steps in 24 hour Measured | valueQuantity /d |
+        | energy, mood, stress, anxiety, depression | survey | local `<type>-self-rating` | valueInteger 1–7 |
         | crp | laboratory | LOINC 1988-5 C reactive protein [Mass/volume] in Serum or Plasma | valueQuantity mg/L, with `comparator` when there is one |
 
         "Local" means the code system `https://halsaplus.example/codes`. These are Hälsa+'s own
         demo codes. The self-ratings are not a validated instrument and do not claim to be one.
-        As everywhere in the API, there is no `interpretation` and no `referenceRange`.
+        There is no `interpretation` and no `referenceRange`.

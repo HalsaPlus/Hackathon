@@ -5,10 +5,17 @@
 import { CRP_LAB, CRP_RESULTS } from './crp.ts';
 import { generateExtension } from './extension.ts';
 import { generateHistory, HISTORY } from './history.ts';
+import { recoveredGlucose } from './recovery.ts';
 import { addDays, parisDate, parisTime } from './time.ts';
-import { generateRatings, generateSleep } from './wellbeing.ts';
+import { generateRatings, generateSleep, generateSteps } from './wellbeing.ts';
 
-export const OBSERVATION_TYPES = ['blood-pressure', 'glucose', 'sleep', 'anxiety', 'stress', 'bmi', 'crp'] as const;
+export const OBSERVATION_TYPES = ['blood-pressure', 'glucose', 'sleep', 'steps', 'energy', 'mood', 'stress', 'anxiety', 'depression', 'bmi', 'crp'] as const;
+
+/** Andrea's own 1–7 self-ratings in the Hälsa+ app (not a validated instrument). */
+export const RATING_TYPES = ['energy', 'mood', 'stress', 'anxiety', 'depression'] as const;
+export type RatingType = (typeof RATING_TYPES)[number];
+export const RATING_UNIT = '1–7';
+export const isRatingType = (type: string): type is RatingType => (RATING_TYPES as readonly string[]).includes(type);
 export type ObservationType = (typeof OBSERVATION_TYPES)[number];
 export type Comparator = '<' | '<=' | '>' | '>=';
 
@@ -67,8 +74,8 @@ export const ANDREA_DEVICES: Device[] = [
   { id: '6f9f647e-3f38-5bb4-a897-75ebf3d250b7', type: 'cgm-sensor', name: 'CGM sensor (demo)', source: 'bluetooth', types: ['glucose'], since: '2019-05-20' },
   { id: '487a0ac7-adec-5ab4-9a07-451e80585c1e', type: 'blood-pressure-monitor', name: 'Blood pressure monitor (demo)', source: 'bluetooth', types: ['blood-pressure'], since: '2026-03-01' },
   { id: '506bfdb7-f834-57d6-8631-9b8ba5a24897', type: 'scale', name: 'Scale (demo)', source: 'bluetooth', types: ['bmi'], since: '2026-03-01' },
-  { id: '9aadb89f-7c71-5a8a-bb38-f32fceb26615', type: 'smartwatch', name: 'Smartwatch (demo)', source: 'bluetooth', types: ['sleep'], since: '2026-03-01' },
-  { id: '6416ebbc-5cba-5d4d-875b-381123d451ea', type: 'app', name: 'Hälsa+ app', source: 'manual-entry', types: ['anxiety', 'stress', 'blood-pressure', 'glucose', 'bmi', 'sleep'], since: '2026-03-01' },
+  { id: '9aadb89f-7c71-5a8a-bb38-f32fceb26615', type: 'smartwatch', name: 'Smartwatch (demo)', source: 'bluetooth', types: ['sleep', 'steps'], since: '2026-03-01' },
+  { id: '6416ebbc-5cba-5d4d-875b-381123d451ea', type: 'app', name: 'Hälsa+ app', source: 'manual-entry', types: ['energy', 'mood', 'stress', 'anxiety', 'depression', 'blood-pressure', 'glucose', 'bmi', 'sleep'], since: '2026-03-01' },
 ];
 const [CGM, BP, SCALE, WATCH, APP] = ANDREA_DEVICES.map((d) => d.id);
 
@@ -101,7 +108,7 @@ export function buildDataset(startDate: string): Dataset {
 
   for (const r of [...history.glucose, ...extension.glucose]) {
     const ms = Date.parse(r.at);
-    add(ms, { id: idFor('glucose', ms), type: 'glucose', sourceType: 'device', deviceId: CGM, effectiveDateTime: isoTime(ms), value: r.value, unit: 'mmol/L' });
+    add(ms, { id: idFor('glucose', ms), type: 'glucose', sourceType: 'device', deviceId: CGM, effectiveDateTime: isoTime(ms), value: recoveredGlucose(ms, r.value), unit: 'mmol/L' });
   }
   for (const r of [...history.bp, ...extension.bp]) {
     const ms = Date.parse(r.at);
@@ -149,7 +156,11 @@ export function buildDataset(startDate: string): Dataset {
   }
   for (const r of generateRatings(lastDate, end)) {
     const ms = Date.parse(r.at);
-    add(ms, { id: idFor(r.type, ms), type: r.type, sourceType: 'patient-reported', deviceId: APP, effectiveDateTime: isoTime(ms), value: r.value, unit: '0–10' });
+    add(ms, { id: idFor(r.type, ms), type: r.type, sourceType: 'patient-reported', deviceId: APP, effectiveDateTime: isoTime(ms), value: r.value, unit: RATING_UNIT });
+  }
+  for (const d of generateSteps(lastDate, end)) {
+    const ms = Date.parse(d.at);
+    add(ms, { id: idFor('steps', ms), type: 'steps', sourceType: 'device', deviceId: WATCH, effectiveDateTime: isoTime(ms), value: d.steps, unit: 'steps' });
   }
   for (const r of CRP_RESULTS) {
     const sampled = Date.parse(r.sampled);

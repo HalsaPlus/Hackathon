@@ -1,18 +1,29 @@
-import type { ReactNode } from 'react';
-import { HALSA_SERIES, type HalsaPoint, type HalsaSeries, halsaDevice, halsaSeriesFor } from '../../../shared/halsa.ts';
+import { type ReactNode, useState } from 'react';
+import { HALSA_SERIES, type HalsaPoint, type HalsaSeries, halsaDevice, halsaSeriesFor, type OverviewCategory } from '../../../shared/halsa.ts';
 import type { ScreenProps } from '../App.tsx';
-import { useHalsaSeries } from '../halsa.ts';
+import { useHalsaOverview, useHalsaSeries, useHalsaVaccinations } from '../halsa.ts';
 import { formatClock, formatShort, lanes } from '../model.ts';
+import { CategoryView, HalsaHome, Vaccinations } from './HalsaHome.tsx';
 import { Sparkline } from './Health.tsx';
 
-// "My data" for a patient linked to Hälsa+: the last 14 days of each series
-// from Hälsa+, in the same cards as the values reported in MMD. Patients
-// without a link get `fallback` (MMD's own list), unchanged.
+// "My data" for a patient linked to Hälsa+. The main view: the Hälsa+ home
+// (Health score and body figure), then the last 14 days of every series in
+// the same cards as the values reported in MMD, then her vaccinations. A tap
+// on a bubble shows that category alone (CategoryView), without the feed;
+// back returns to the figure. Patients without a link get `fallback` (MMD's
+// own list), unchanged.
 
 const when = (time: string) => `${formatShort(time)} ${formatClock(time)}`;
 
 export function HalsaData({ view, patientGuid, fallback }: Pick<ScreenProps, 'view' | 'patientGuid'> & { fallback: ReactNode }) {
   const state = useHalsaSeries(patientGuid);
+  const overview = useHalsaOverview(patientGuid);
+  const vaccinations = useHalsaVaccinations(patientGuid);
+  const [open, setOpen] = useState<OverviewCategory['id'] | null>(null);
+  const show = (id: OverviewCategory['id'] | null) => {
+    setOpen(id);
+    window.scrollTo(0, 0);
+  };
 
   if (state.status === 'idle' || state.status === 'unlinked') return fallback;
   if (state.status === 'loading') {
@@ -33,6 +44,9 @@ export function HalsaData({ view, patientGuid, fallback }: Pick<ScreenProps, 'vi
     );
   }
 
+  const category = open && overview.status === 'ready' ? overview.data.categories.find((c) => c.id === open) : undefined;
+  if (category) return <CategoryView category={category} points={state.data.points} onBack={() => show(null)} />;
+
   // The plan's range and line colour for each series it asks for.
   const ranges = new Map<HalsaSeries, { low?: number; high?: number; color: string }>();
   for (const lane of lanes(view)) {
@@ -47,14 +61,23 @@ export function HalsaData({ view, patientGuid, fallback }: Pick<ScreenProps, 'vi
 
   if (shown.length === 0) {
     return (
-      <section className="card">
-        <h2>Nothing from Hälsa+ yet</h2>
-        <p className="muted">Hälsa+ has no values from the last 14 days.</p>
-      </section>
+      <>
+        <HalsaHome overview={overview} onOpen={show} />
+        <section className="card">
+          <h2>Nothing from Hälsa+ yet</h2>
+          <p className="muted">Hälsa+ has no values from the last 14 days.</p>
+        </section>
+        <Vaccinations vaccinations={vaccinations} />
+      </>
     );
   }
 
   return (
+    <>
+    <HalsaHome overview={overview} onOpen={show} />
+    <h2 className="k" style={{ margin: '8px 0 0' }}>
+      Last 14 days
+    </h2>
     <ul className="list" style={{ gap: 12 }}>
       {shown.map((series) => {
         const info = HALSA_SERIES[series];
@@ -64,7 +87,7 @@ export function HalsaData({ view, patientGuid, fallback }: Pick<ScreenProps, 'vi
         const average = numbers.reduce((a, b) => a + b, 0) / numbers.length;
         const range = ranges.get(series);
         const color = range?.color ?? '#03D4D1';
-        const unit = (p: HalsaPoint) => (info.rating ? 'of 10' : (p.unit ?? ''));
+        const unit = (p: HalsaPoint) => (info.rating ? `of ${info.rating.max}` : (p.unit ?? ''));
         return (
           <li key={series} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -103,5 +126,7 @@ export function HalsaData({ view, patientGuid, fallback }: Pick<ScreenProps, 'vi
         );
       })}
     </ul>
+    <Vaccinations vaccinations={vaccinations} />
+    </>
   );
 }

@@ -5,12 +5,17 @@ import { now as isoNow, type Database } from './db.ts';
 import { toFhirBundle } from './fhir.ts';
 import { displayPersonalIdentityNumber, ensureToken, patientForToken, type PatientRow } from './patients.ts';
 import { INSERT_OBSERVATION, observationRow, seedAndrea } from './seed.ts';
+import { buildOverview, OVERVIEW_WINDOW_DAYS } from './overview.ts';
 import { findObservation, findObservations, lastSync, latestObservations, listDevices } from './store.ts';
+import { VACCINATIONS } from './synthetic/vaccinations.ts';
 import {
   ANDREA,
   dataWindow,
   isoTime,
+  isRatingType,
   OBSERVATION_TYPES,
+  RATING_TYPES,
+  RATING_UNIT,
   todayInParis,
   type Component,
   type ObservationType,
@@ -18,10 +23,12 @@ import {
 } from './synthetic/dataset.ts';
 
 // The simulated Hälsa+ API. See openapi.yaml for the contract.
-// SYNTHETIC TEST DATA ONLY. No interpretation, ranges or statistics anywhere.
+// SYNTHETIC TEST DATA ONLY. Observations are returned as they are, without
+// interpretation; only GET /api/v1/overview scores them, against demo ranges
+// (see overview.ts), like the Hälsa+ home screen.
 // A bearer token identifies one patient; every endpoint returns only her data.
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 const ANDREA_TOKEN_LABEL = 'HALSA_ANDREA_TOKEN (bootstrap)';
 
 export interface AppOptions {
@@ -226,6 +233,25 @@ export function createApp(options: AppOptions): Express {
     res.status(201).json(withStatus(findObservation(database, patient.guid, observation.id)!));
   });
 
+  // Andrea's vaccinations: a short synthetic history (SYNTHETIC TEST DATA ONLY).
+  app.get('/api/v1/vaccinations', (_req, res) => {
+    res.json({ synthetic: true, items: patientOf(res).guid === ANDREA.guid ? VACCINATIONS : [] });
+  });
+
+  // Six categories with a score each and a total, against DEMO reference ranges.
+  app.get('/api/v1/overview', (req, res) => {
+    const asOf = asOfFrom(req);
+    const overview = buildOverview(database, patientOf(res).guid, asOf, withStatus);
+    res.json({
+      asOf: isoTime(asOf),
+      window: { from: isoTime(overview.from), to: isoTime(asOf), days: OVERVIEW_WINDOW_DAYS },
+      demoRanges: true,
+      synthetic: true,
+      healthScore: overview.healthScore,
+      categories: overview.categories,
+    });
+  });
+
   // Care-plan requests arrive from MMD/PDHC in a later step; the list is empty for now.
   app.get('/api/v1/requests', (_req, res) => {
     res.json({ items: [] });
@@ -273,7 +299,7 @@ export function createApp(options: AppOptions): Express {
 
 /** Input checks only: they reject typing errors and say nothing about the value itself. */
 const INPUT_LIMITS = {
-  rating: [0, 10],
+  rating: [1, 7],
   glucose: [0.5, 40],
   systolic: [40, 300],
   diastolic: [20, 200],
@@ -299,7 +325,7 @@ function componentValue(components: unknown, code: string) {
 function selfReported(body: unknown, patient: PatientRow, clock: number, earliest: number): StoredObservation {
   const input = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
   const type = input.type;
-  const allowed = ['anxiety', 'stress', 'blood-pressure', 'glucose', 'bmi', 'sleep'];
+  const allowed = [...RATING_TYPES, 'blood-pressure', 'glucose', 'bmi', 'sleep'];
   if (typeof type !== 'string' || !allowed.includes(type)) {
     throw new ApiError(400, 'invalid_type', `type must be one of ${allowed.join(', ')}. CRP comes only from a lab.`);
   }
@@ -331,10 +357,8 @@ function selfReported(body: unknown, patient: PatientRow, clock: number, earlies
 
   const ms = time(input.effectiveDateTime, 'effectiveDateTime');
   const effectiveDateTime = isoTime(ms);
+  if (isRatingType(type)) return { ...base(ms), effectiveDateTime, value: numberIn(input.value, 'rating', true), unit: RATING_UNIT };
   switch (type) {
-    case 'anxiety':
-    case 'stress':
-      return { ...base(ms), effectiveDateTime, value: numberIn(input.value, 'rating', true), unit: '0–10' };
     case 'glucose':
       return { ...base(ms), effectiveDateTime, value: Math.round(numberIn(input.value, 'glucose') * 10) / 10, unit: 'mmol/L' };
     case 'blood-pressure': {
