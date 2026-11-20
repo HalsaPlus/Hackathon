@@ -63,6 +63,24 @@ Ett 2xx-svar räknas som levererat, och ett id i svaret sparas.
 - **Misslyckade leveranser:** prövas igen efter en minut, högst fem gånger. Kortet har också en **Retry**-knapp.
 - **I appen:** under Andreas meddelande står "Sent to care team" eller "Not delivered – will retry".
 
+## Vårdteamets system är master för chatten (poll)
+
+- **Fullständig spegling:** vid varje hämtning hämtar MMD alla vårdteamets Communications för Andrea (`Communication?_since=2000-01-01T00:00:00Z`).
+- **Andreas chatt görs lika med dem:**
+  - nya läggs till;
+  - ändrade uppdateras;
+  - borttagna tas bort.
+- **I en transaktion:** allt sker i samma transaktion, med Communication-id:t som nyckel.
+- **Plankort (`system`)** rörs aldrig.
+- **Avsändare:** en avsändare som är en Patient blir Andreas meddelande, allt annat vårdteamets. Tiden är `sent`.
+- **Hennes nya meddelanden** skickas med `$process-message` och visas som väntande tills de kommer tillbaka från vårdteamets system. Då ersätts de av den speglade versionen. MMD känner igen meddelandet på något av tre sätt:
+  - samma id som i svaret från `$process-message`;
+  - vårt `mmd-message-<id>` med samma text;
+  - samma text inom 10 minuter.
+- **Utkorgen** skickar aldrig ett meddelande som kommit via speglingen.
+- **Om hämtningen misslyckas** ändras ingenting, och den senaste speglingen står kvar.
+- **Tider:** varje sekund medan någon har chatten öppen och synlig, annars var 30:e sekund.
+
 ## Det MMD tar emot
 
 - **Format:** `Communication`-resurser i en `Bundle` (searchset eller message), med texten i `contentString` eller `contentCodeableConcept.text`.

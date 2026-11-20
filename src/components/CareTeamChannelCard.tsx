@@ -128,7 +128,9 @@ export function CareTeamChannelCard() {
           ? `${answer.ok ? 'OK' : 'Failed'}: ${answer.message}`
           : typeof answer.error === 'string'
             ? `Failed: ${answer.error}`
-            : 'stored' in answer
+            : 'deleted' in answer
+              ? `Mirrored ${answer.total} message(s): ${answer.inserted} new, ${answer.updated} changed, ${answer.deleted} removed, ${answer.matched} of hers came back.`
+              : 'stored' in answer
               ? `Fetched: ${answer.stored} new, ${answer.duplicates} already here, ${answer.rejected} rejected.`
               : 'detail' in answer
                 ? `${String(answer.status)}: ${String(answer.detail)}`

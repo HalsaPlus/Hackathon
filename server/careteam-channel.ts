@@ -1,8 +1,9 @@
+import { EventEmitter } from 'node:events';
 import express from 'express';
 import type { Express, Request, Response } from 'express';
 import { safeEqual } from './auth.ts';
-import { all, db, get, now, run } from './db.ts';
-import { type ChatMessage, toMessageBundle } from './messaging.ts';
+import { all, db, get, now, run, transaction } from './db.ts';
+import { type ChatMessage, toCommunication, toMessageBundle } from './messaging.ts';
 import { getSettings } from './settings.ts';
 import { addMessage, isClosed, type ServiceRequestRow } from './store.ts';
 
@@ -15,9 +16,14 @@ import { addMessage, isClosed, type ServiceRequestRow } from './store.ts';
 // {endpointUrl}/{sendPath}. Each delivery gets a status: pending, delivered or
 // failed.
 //
-// Inbound: the care team's Communications are fetched every 30 s (poll) or
-// pushed to POST /api/v1/inbound/message (push), and stored as chat messages
-// from the care team, once per remote Communication id.
+// Inbound, poll mode: the care team's system is the MASTER of the patient's
+// chat. Every fetch gets all its Communications for the patient and makes
+// her 'patient' and 'care-team' messages here equal to them (insert, update,
+// delete, keyed on the Communication id), in one transaction; plan cards
+// ('system') are never touched. Her own new messages show as pending until
+// they come back from the care team's system. Every second while a chat is
+// open and visible, every 30 s otherwise. Push mode: Communications pushed to
+// POST /api/v1/inbound/message are stored once per remote id.
 //
 // For the demo the channel is for one patient, Andrea Lindqvist (synthetic),
 // by her PDHC patient GUID. Everything is configured in the admin console and
@@ -440,6 +446,7 @@ export async function sendPending(settings = getChannelSettings()) {
     const due = all<{ id: number }>(
       `SELECT m.id FROM messages m LEFT JOIN careteam_deliveries d ON d.message_id = m.id
        WHERE m.patient_guid = :patient AND m.sender = 'patient' AND m.id > :first
+         AND m.id NOT IN (SELECT message_id FROM careteam_inbound)
          AND (d.message_id IS NULL OR (d.status = 'failed' AND d.attempts < :max AND d.updated_at < :retryBefore))
        ORDER BY m.id LIMIT 20`,
       { patient: settings.patientGuid, first, max: MAX_ATTEMPTS, retryBefore },
@@ -554,26 +561,218 @@ export function receiveBundle(body: unknown, settings = getChannelSettings(), vi
   return result;
 }
 
+// --- Poll mode: the care team's system is the master of the chat ----------------------
+
+/** Everything: the mirror asks for all Communications, not only new ones. */
+export const MIRROR_SINCE = '2000-01-01T00:00:00Z';
+/** Her own message comes back with the same text within this time: the same message. */
+const MATCH_WINDOW_MS = 10 * 60_000;
+const MAX_PAGES = 20;
+
+/** 'changed' (patientGuid) when a mirror changed the chat, for the live updates. */
+export const channelEvents = new EventEmitter();
+
+export interface MirrorResult extends InboundResult {
+  /** New messages from the care team's system. */
+  inserted: number;
+  /** Messages whose text, time or sender changed there. */
+  updated: number;
+  /** Messages here that are no longer there. */
+  deleted: number;
+  /** Her own messages that came back from there (no longer pending). */
+  matched: number;
+  /** Communications for the patient in the care team's system. */
+  total: number;
+  changed: boolean;
+}
+
+interface Remote {
+  id: string;
+  sender: 'patient' | 'care-team';
+  text: string;
+  createdAt: string;
+  senderName: string | null;
+}
+
+class FetchError extends Error {}
+
+/** All of the care team's Communications (following `next` links on the same server). */
+async function fetchAllCommunications(settings: ChannelSettings): Promise<Json[]> {
+  let url = channelUrl(settings, settings.pollPath, { patientGuid: settings.patientGuid, since: MIRROR_SINCE });
+  const origin = new URL(settings.endpointUrl!).origin;
+  const resources: Json[] = [];
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const response = await request(settings, 'GET', url);
+    if (!response.ok) throw new FetchError(`Fetching answered ${response.status}. ${await shortAnswer(response, settings)}`.trim());
+    const json = (await response.json()) as Json;
+    if (json?.resourceType !== 'Bundle') throw new FetchError('Fetching did not answer with a FHIR Bundle.');
+    for (const entry of Array.isArray(json.entry) ? json.entry : []) {
+      if (entry?.resource?.resourceType === 'Communication') resources.push(entry.resource);
+    }
+    const next = (Array.isArray(json.link) ? json.link : []).find((l: Json) => l?.relation === 'next')?.url;
+    if (typeof next !== 'string') break;
+    const nextUrl = new URL(next, url);
+    if (nextUrl.origin !== origin) break;
+    url = nextUrl.toString();
+  }
+  return resources;
+}
+
+function toRemote(c: Json, settings: ChannelSettings): Remote | 'other-patient' | null {
+  const subject = patientOf(c);
+  if (subject === null || (subject !== settings.patientGuid && !settings.patientAliases.includes(subject))) return 'other-patient';
+  const text = textOf(c);
+  const id = c.id ?? c.identifier?.[0]?.value;
+  if (!text || id === undefined || id === null) return null;
+  const senderRef = typeof c.sender?.reference === 'string' ? c.sender.reference : '';
+  const time = [c.sent, c.meta?.lastUpdated].find((t) => typeof t === 'string' && !Number.isNaN(Date.parse(t)));
+  return {
+    id: String(id),
+    sender: /(^|\/)Patient\//.test(senderRef) ? 'patient' : 'care-team',
+    text,
+    createdAt: time ? new Date(time).toISOString() : now(),
+    senderName: typeof c.sender?.display === 'string' ? c.sender.display.slice(0, 80) : null,
+  };
+}
+
+function setMessage(id: number, patientGuid: string, remote: Remote) {
+  const fhir = toCommunication({ id, patientGuid, sender: remote.sender, text: remote.text, serviceRequestGuid: null, createdAt: remote.createdAt });
+  run('UPDATE messages SET sender = :sender, text = :text, created_at = :at, fhir_json = :fhir WHERE id = :id', {
+    id,
+    sender: remote.sender,
+    text: remote.text.slice(0, 2000),
+    at: remote.createdAt,
+    fhir: JSON.stringify(fhir),
+  });
+}
+
+function deleteMessage(id: number) {
+  run('DELETE FROM careteam_inbound WHERE message_id = :id', { id });
+  run('DELETE FROM careteam_deliveries WHERE message_id = :id', { id });
+  run('DELETE FROM messages WHERE id = :id', { id });
+}
+
+/**
+ * Makes the patient's 'patient' and 'care-team' messages equal to the care
+ * team's Communications, in one transaction. Her own messages written since
+ * the channel was turned on stay (pending) until they come back.
+ */
+export function applyMirror(communications: Json[], settings = getChannelSettings()): MirrorResult {
+  const patient = settings.patientGuid;
+  const result: MirrorResult = { stored: 0, duplicates: 0, ignored: 0, rejected: 0, latest: null, inserted: 0, updated: 0, deleted: 0, matched: 0, total: 0, changed: false };
+  const remotes: Remote[] = [];
+  const seen = new Set<string>();
+  for (const c of communications) {
+    const remote = toRemote(c, settings);
+    if (remote === 'other-patient') result.rejected += 1;
+    else if (!remote || seen.has(remote.id)) result.ignored += 1;
+    else {
+      seen.add(remote.id);
+      remotes.push(remote);
+    }
+  }
+  remotes.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+  result.total = remotes.length;
+  if (result.rejected) log('in', 'rejected', `poll: ${result.rejected} Communication(s) for another patient were ignored.`);
+  if (!get('SELECT guid FROM patients WHERE guid = :guid', { guid: patient })) {
+    log('in', 'rejected', 'poll: the patient is not in MMD yet.');
+    return result;
+  }
+
+  transaction(() => {
+    const mirrored = new Map(
+      all<{ remote_id: string; message_id: number; sender: string; text: string; created_at: string; sender_name: string | null }>(
+        `SELECT i.remote_id, i.message_id, m.sender, m.text, m.created_at, i.sender_name
+         FROM careteam_inbound i JOIN messages m ON m.id = i.message_id
+         WHERE m.patient_guid = :p AND m.sender IN ('patient', 'care-team')`,
+        { p: patient },
+      ).map((row) => [row.remote_id, row]),
+    );
+    const first = Number(readKey('first_message_id') ?? '0');
+    const local = all<{ id: number; sender: string; text: string; created_at: string; delivery_remote: string | null }>(
+      `SELECT m.id, m.sender, m.text, m.created_at, d.remote_id AS delivery_remote
+       FROM messages m LEFT JOIN careteam_deliveries d ON d.message_id = m.id
+       WHERE m.patient_guid = :p AND m.sender IN ('patient', 'care-team')
+         AND m.id NOT IN (SELECT message_id FROM careteam_inbound)`,
+      { p: patient },
+    );
+    // Her own messages since the channel was turned on: waiting to come back.
+    const waiting = local.filter((l) => l.sender === 'patient' && l.id > first);
+    const used = new Set<number>();
+
+    for (const remote of remotes) {
+      const existing = mirrored.get(remote.id);
+      if (existing) {
+        if (existing.text !== remote.text || existing.created_at !== remote.createdAt || existing.sender !== remote.sender) {
+          setMessage(existing.message_id, patient, remote);
+          result.updated += 1;
+        } else result.duplicates += 1;
+        if ((existing.sender_name ?? null) !== remote.senderName) {
+          run('UPDATE careteam_inbound SET sender_name = :name WHERE remote_id = :id', { id: remote.id, name: remote.senderName });
+        }
+        continue;
+      }
+      // One of her own messages, back from the care team's system?
+      const own =
+        remote.sender === 'patient'
+          ? waiting.find(
+              (l) =>
+                !used.has(l.id) &&
+                (l.delivery_remote === remote.id ||
+                  (remote.id === `mmd-message-${l.id}` && l.text === remote.text) ||
+                  (l.text === remote.text && Math.abs(Date.parse(l.created_at) - Date.parse(remote.createdAt)) <= MATCH_WINDOW_MS)),
+            )
+          : undefined;
+      if (own) {
+        used.add(own.id);
+        run('INSERT INTO careteam_inbound (remote_id, message_id, sender_name, received_at) VALUES (:id, :m, :name, :at)', { id: remote.id, m: own.id, name: remote.senderName, at: now() });
+        if (own.text !== remote.text || own.created_at !== remote.createdAt) setMessage(own.id, patient, remote);
+        result.matched += 1;
+        continue;
+      }
+      const message = addMessage(patient, remote.sender, remote.text, null, remote.createdAt);
+      run('INSERT INTO careteam_inbound (remote_id, message_id, sender_name, received_at) VALUES (:id, :m, :name, :at)', { id: remote.id, m: message.id, name: remote.senderName, at: now() });
+      result.inserted += 1;
+    }
+
+    // No longer in the care team's system: gone here too.
+    for (const [remoteId, row] of mirrored) {
+      if (!seen.has(remoteId)) {
+        deleteMessage(row.message_id);
+        result.deleted += 1;
+      }
+    }
+    // Older messages here that the care team's system never had (not hers waiting to come back).
+    for (const l of local) {
+      if (!used.has(l.id) && !waiting.includes(l)) {
+        deleteMessage(l.id);
+        result.deleted += 1;
+      }
+    }
+  });
+
+  result.stored = result.inserted;
+  result.changed = result.inserted + result.updated + result.deleted + result.matched > 0;
+  if (result.changed) {
+    log('in', 'mirrored', `poll: ${result.inserted} new, ${result.updated} changed, ${result.deleted} removed, ${result.matched} of hers came back.`);
+    channelEvents.emit('changed', patient);
+  }
+  return result;
+}
+
 let polling = false;
 
-/** Poll mode: fetches the care team's Communications since the last one seen. */
-export async function pollOnce(settings = getChannelSettings()): Promise<InboundResult | { error: string }> {
+/** Poll mode: mirrors the care team's system. On any failure nothing here changes. */
+export async function pollOnce(settings = getChannelSettings()): Promise<MirrorResult | { error: string }> {
   if (!settings.enabled || settings.receiveMode !== 'poll' || !settings.endpointUrl) return { error: 'Poll mode is not on.' };
   if (polling) return { error: 'Already fetching.' };
   polling = true;
   try {
-    const since = readKey('poll_since') ?? new Date(Date.now() - 24 * 3600_000).toISOString();
-    const response = await request(settings, 'GET', channelUrl(settings, settings.pollPath, { patientGuid: settings.patientGuid, since }));
-    if (!response.ok) {
-      const detail = `Fetching answered ${response.status}. ${await shortAnswer(response, settings)}`.trim();
-      log('in', 'failed', detail);
-      return { error: detail };
-    }
-    const result = receiveBundle(await response.json(), settings, 'poll');
-    if (result.latest && result.latest > since) writeKey('poll_since', result.latest);
-    return result;
+    const communications = await fetchAllCommunications(settings);
+    return applyMirror(communications, settings);
   } catch (error) {
-    const detail = error instanceof Error ? `Could not fetch from the care team: ${error.message}` : 'Could not fetch from the care team.';
+    const detail =
+      error instanceof FetchError ? error.message : error instanceof Error ? `Could not fetch from the care team: ${error.message}` : 'Could not fetch from the care team.';
     log('in', 'failed', detail);
     return { error: detail };
   } finally {
@@ -593,7 +792,7 @@ export const ON_DEMAND_INTERVAL_MS = 1000;
 export const ON_DEMAND_BACKOFF_MS = 10_000;
 export const ON_DEMAND_FAILURES_BEFORE_BACKOFF = 3;
 
-type PollResult = InboundResult | { error: string };
+type PollResult = MirrorResult | { error: string };
 export type OnDemandResult = PollResult & { fresh: boolean };
 
 const onDemand = { lastStartedAt: -Infinity, lastResult: null as PollResult | null, failures: 0, running: false };
@@ -609,7 +808,8 @@ export function onDemandWaitMs() {
 
 /** A fetch for the open chat, throttled and never overlapping. `fresh` says whether this call fetched. */
 export async function pollOnDemand(settings = getChannelSettings(), now = Date.now()): Promise<OnDemandResult> {
-  const last = (): OnDemandResult => ({ ...(onDemand.lastResult ?? { stored: 0, duplicates: 0, ignored: 0, rejected: 0, latest: null }), fresh: false });
+  const empty: MirrorResult = { stored: 0, duplicates: 0, ignored: 0, rejected: 0, latest: null, inserted: 0, updated: 0, deleted: 0, matched: 0, total: 0, changed: false };
+  const last = (): OnDemandResult => ({ ...(onDemand.lastResult ?? empty), fresh: false });
   if (onDemand.running || polling) return last();
   if (now - onDemand.lastStartedAt < onDemandWaitMs()) return last();
   onDemand.running = true;
@@ -631,19 +831,28 @@ export function chatStatus(patientGuid: string) {
   const settings = getChannelSettings();
   const enabled = settings.enabled && !!settings.endpointUrl && settings.patientGuid === patientGuid;
   if (!enabled) return { enabled: false, deliveries: {}, senders: {} };
+  // Her message is "sent" once it is back from the care team's system (poll
+  // mode) or delivered (push and send-only); until then pending, or failed.
+  const mirrored = new Set(
+    all<{ message_id: number }>(`SELECT i.message_id FROM careteam_inbound i JOIN messages m ON m.id = i.message_id WHERE m.patient_guid = :p`, { p: patientGuid }).map(
+      (r) => r.message_id,
+    ),
+  );
+  const sentWhenDelivered = settings.receiveMode !== 'poll';
   const deliveries: Record<number, { status: string; final: boolean }> = {};
   for (const d of all<{ message_id: number; status: string; attempts: number }>(
     `SELECT d.message_id, d.status, d.attempts FROM careteam_deliveries d JOIN messages m ON m.id = d.message_id WHERE m.patient_guid = :p`,
     { p: patientGuid },
   )) {
-    deliveries[d.message_id] = { status: d.status, final: d.attempts >= MAX_ATTEMPTS };
+    const status = mirrored.has(d.message_id) || (sentWhenDelivered && d.status === 'delivered') ? 'delivered' : d.status === 'failed' ? 'failed' : 'pending';
+    deliveries[d.message_id] = { status, final: d.attempts >= MAX_ATTEMPTS };
   }
   const first = Number(readKey('first_message_id') ?? '0');
   for (const { id } of all<{ id: number }>(
     `SELECT id FROM messages WHERE patient_guid = :p AND sender = 'patient' AND id > :first`,
     { p: patientGuid, first },
   )) {
-    deliveries[id] ??= { status: 'pending', final: false };
+    if (!mirrored.has(id)) deliveries[id] ??= { status: 'pending', final: false };
   }
   const senders: Record<number, string> = {};
   for (const s of all<{ message_id: number; sender_name: string | null }>(

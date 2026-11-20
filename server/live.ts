@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Express } from 'express';
-import { getChannelSettings, pollOnDemand, sendPending } from './careteam-channel.ts';
+import { channelEvents, getChannelSettings, pollOnDemand, sendPending } from './careteam-channel.ts';
 import { all } from './db.ts';
 import { acceptUpgrade, type LiveSocket, rejectUpgrade } from './live-socket.ts';
 
@@ -238,6 +238,9 @@ let timers: ReturnType<typeof setInterval>[] = [];
  * Registers POST /api/live/ticket (call after setupAuth: Casper's login
  * guards it) and the WebSocket endpoint /ws on the HTTP server.
  */
+// A mirror of the care team's system that changed the chat (also deletions and edits).
+channelEvents.on('changed', (patientGuid: string) => notifyChanged(patientGuid, ['messages', 'delivery']));
+
 export function setupLive(server: Server, app: Express, options: LiveOptions = {}) {
   app.post('/api/live/ticket', (_req, res) => {
     res.set('Cache-Control', 'no-store').json({ ticket: issueTicket() });
