@@ -1,12 +1,15 @@
 // Mirror mode for the demo: one person uses the app as Andrea on their own
 // device ("drive"), and the stage shows every step of it as if someone were
-// using the phone there ("follow"). Roles come from the address:
-// /phone?role=drive and /phone?role=follow (read from the /phone page around
-// the app's iframe), or /app/?role=…. Without a role nothing here runs.
+// using the phone there ("follow"). The starting role comes from the
+// address: /phone?role=drive and /phone?role=follow (read from the /phone
+// page around the app's iframe), or /app/?role=…. Plain /phone, without a
+// role, starts as a follower, so its "Take control" button works too. /app/
+// on its own without a role does not start mirror mode at all.
 //
 // The role can change during the demo: the "Take control  D" button on
 // /phone (or the D key) makes this browser the driver and the previous driver
-// a follower; "Hand over  D" makes it a follower.
+// a follower; "Hand over  D" makes it a follower. D never switches while
+// typing in a field (input, textarea, select, contenteditable).
 //
 // The driver sends, every 50 ms and only when something changed: the screen
 // (hash route), the chat input's draft, the scroll position (as a fraction),
@@ -30,16 +33,37 @@ const roleIn = (search: string): MirrorRole | null => {
   return role === 'drive' || role === 'follow' ? role : null;
 };
 
+/**
+ * The starting role: ?role= in the app's own address, else in the address of
+ * the page around it; inside the /phone page without one, 'follow'.
+ * `parent` is null when the app is not in a frame (or the frame is another
+ * origin's).
+ */
+export function roleFrom(ownSearch: string, parent: { search: string; pathname: string } | null): MirrorRole | null {
+  const own = roleIn(ownSearch);
+  if (own) return own;
+  if (!parent) return null;
+  const fromParent = roleIn(parent.search);
+  if (fromParent) return fromParent;
+  return /^\/phone\/?$/.test(parent.pathname) ? 'follow' : null;
+}
+
 export function mirrorRole(): MirrorRole | null {
   if (typeof window === 'undefined') return null;
-  const own = roleIn(window.location.search);
-  if (own) return own;
+  let parent: { search: string; pathname: string } | null = null;
   try {
-    if (window.parent !== window) return roleIn(window.parent.location.search);
+    if (window.parent !== window) parent = { search: window.parent.location.search, pathname: window.parent.location.pathname };
   } catch {
-    // Another origin around us: no role.
+    // Another origin around us: no role from there.
   }
-  return null;
+  return roleFrom(window.location.search, parent);
+}
+
+/** Whether a key press switches the role: D without modifiers, and never while typing in a field. */
+export function togglesOnKey(event: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean }, typingInField: boolean) {
+  if (event.key !== 'd' && event.key !== 'D') return false;
+  if (event.metaKey || event.ctrlKey || event.altKey) return false;
+  return !typingInField;
 }
 
 const labelOf = (el: Element) => (el.getAttribute('aria-label') ?? el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
@@ -115,11 +139,9 @@ export function startMirror(io: MirrorIo) {
     become(next);
   };
 
-  // D toggles, in the /phone page and in the app; not while the driver types.
+  // D toggles, in the /phone page and in the app; never while typing in a field.
   const onKey = (event: KeyboardEvent) => {
-    if (event.key !== 'd' && event.key !== 'D') return;
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (role === 'drive' && editing(event.target)) return;
+    if (!togglesOnKey(event, editing(event.target))) return;
     event.preventDefault();
     toggle();
   };
