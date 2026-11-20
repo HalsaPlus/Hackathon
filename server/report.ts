@@ -1,4 +1,5 @@
 import type { ReportInput, ReportResult, ReportStatus, SentReport, Transaction } from '../shared/types.ts';
+import { sendValuesToCareTeam, valuesTarget } from './careteam-values.ts';
 import { gatewayValue, reportToGateway } from './pdhc.ts';
 import {
   activityStops,
@@ -107,6 +108,8 @@ export async function reportStop(patientGuid: string, input: ReportInput, option
     setReportOutcome(ids, 'demo', message, true);
     return { observations: getObservations(ids), reportStatus: 'demo', reportMessage: message, sent: [] };
   }
+  // The care team's system instead of gateway.pdhc, unless switched back in the channel settings.
+  if (valuesTarget() === 'careteam') return sendValuesToCareTeam(request, stored);
   if (!request.grant_token) {
     const message = 'No grant_token for this plan, so PDHC cannot accept the report.';
     setReportOutcome(ids, 'failed', message, false);

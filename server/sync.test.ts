@@ -10,6 +10,8 @@ const { getPatientView } = await import('./store.ts');
 const { reportStop } = await import('./report.ts');
 const { describeTiming } = await import('./schedule.ts');
 const { sendTestReports, testValue, TEST_NOTE } = await import('./testreport.ts');
+// These tests are about gateway.pdhc: send values there, not to the care team's system.
+(await import('./careteam-channel.ts')).saveChannelSettings({ valuesTarget: 'pdhc' });
 
 const BASE = 'https://request.example/api/v1';
 const TEMPLATE_URL = 'https://plan.pdhc.se/api/v1/plandefinitions/pd-1';
