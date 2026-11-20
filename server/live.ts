@@ -27,8 +27,13 @@ import { acceptUpgrade, type LiveSocket, rejectUpgrade } from './live-socket.ts'
 //   of the channel's patient has the Chat screen open and visible, the care
 //   team is asked every second (pollOnDemand: throttled, never overlapping,
 //   backs off); otherwise only the 30-second background poll runs.
-// - Mirror mode: { type: 'mirror', state } from a driver is passed on to the
-//   other subscribers of the same patient (the follower on stage).
+// - Mirror mode: { type: 'mirror', state } from the driver is passed on to the
+//   other subscribers of the same patient (the follower on stage). There is
+//   at most one driver per patient: { type: 'role', role: 'drive' } makes a
+//   client the driver and the previous driver a follower (it is told with
+//   { type: 'role', role: 'follow' }); 'follow' hands over. Everyone on the
+//   patient hears { type: 'driver', present } so followers know whether to
+//   ignore their own input.
 
 export type Topic = 'messages' | 'delivery' | 'observations' | 'consent' | 'requests' | 'stops';
 
@@ -39,6 +44,8 @@ interface Client {
   patientGuid: string | null;
   chatVisible: boolean;
   alive: boolean;
+  /** Mirror mode: the driver of its patient, a follower, or neither. */
+  role: 'drive' | 'follow' | null;
 }
 
 const clients = new Set<Client>();
@@ -169,7 +176,10 @@ function onMessage(client: Client, text: string) {
   if (message.type === 'subscribe' && typeof message.patientGuid === 'string' && message.patientGuid.length <= 100) {
     client.patientGuid = message.patientGuid;
     client.chatVisible = false;
+    client.role = null;
     client.socket.send(JSON.stringify({ type: 'subscribed', patientGuid: client.patientGuid }));
+    const driving = [...clients].some((c) => c !== client && c.patientGuid === client.patientGuid && c.role === 'drive');
+    client.socket.send(JSON.stringify({ type: 'driver', patientGuid: client.patientGuid, present: driving }));
     const mirror = lastMirror.get(client.patientGuid);
     if (mirror && Date.now() - mirror.at < 10_000) client.socket.send(JSON.stringify({ type: 'mirror', patientGuid: client.patientGuid, state: mirror.state }));
     return;
@@ -180,11 +190,38 @@ function onMessage(client: Client, text: string) {
     if (client.chatVisible) fastPollTick();
     return;
   }
-  if (message.type === 'mirror' && client.patientGuid && message.state && typeof message.state === 'object') {
+  if (message.type === 'role' && client.patientGuid && (message.role === 'drive' || message.role === 'follow')) {
+    setRole(client, message.role);
+    return;
+  }
+  if (message.type === 'mirror' && client.patientGuid && client.role === 'drive' && message.state && typeof message.state === 'object') {
     lastMirror.set(client.patientGuid, { state: message.state, at: Date.now() });
     const out = JSON.stringify({ type: 'mirror', patientGuid: client.patientGuid, state: message.state });
     for (const other of clients) if (other !== client && other.patientGuid === client.patientGuid) other.socket.send(out);
   }
+}
+
+/** One driver per patient: taking control makes the previous driver a follower. */
+function setRole(client: Client, role: 'drive' | 'follow') {
+  const patientGuid = client.patientGuid!;
+  if (role === 'drive') {
+    for (const other of clients) {
+      if (other !== client && other.patientGuid === patientGuid && other.role === 'drive') {
+        other.role = 'follow';
+        other.socket.send(JSON.stringify({ type: 'role', patientGuid, role: 'follow' }));
+      }
+    }
+  }
+  client.role = role;
+  client.socket.send(JSON.stringify({ type: 'role', patientGuid, role }));
+  announceDriver(patientGuid);
+}
+
+function announceDriver(patientGuid: string) {
+  const present = [...clients].some((c) => c.patientGuid === patientGuid && c.role === 'drive');
+  const text = JSON.stringify({ type: 'driver', patientGuid, present });
+  for (const c of clients) if (c.patientGuid === patientGuid) c.socket.send(text);
+  liveEvents.emit('driver', { patientGuid, present });
 }
 
 export interface LiveOptions {
@@ -213,11 +250,14 @@ export function setupLive(server: Server, app: Express, options: LiveOptions = {
     if (!allowed) return rejectUpgrade(socket, 401, 'Unauthorized');
     const live = acceptUpgrade(req, socket);
     if (!live) return;
-    const client: Client = { socket: live, patientGuid: null, chatVisible: false, alive: true };
+    const client: Client = { socket: live, patientGuid: null, chatVisible: false, alive: true, role: null };
     clients.add(client);
     live.on('message', (text: string) => onMessage(client, text));
     live.on('pong', () => (client.alive = true));
-    live.on('close', () => clients.delete(client));
+    live.on('close', () => {
+      clients.delete(client);
+      if (client.role === 'drive' && client.patientGuid) announceDriver(client.patientGuid);
+    });
   });
 
   if (options.timers !== false) {

@@ -11,6 +11,8 @@ import { startMirror } from './mirror.ts';
 export type LiveMessage =
   | { type: 'changed'; patientGuid: string; topics: string[] }
   | { type: 'mirror'; patientGuid: string; state: Record<string, unknown> }
+  | { type: 'role'; patientGuid: string; role: 'drive' | 'follow' }
+  | { type: 'driver'; patientGuid: string; present: boolean }
   | { type: 'subscribed'; patientGuid: string };
 
 export interface LiveSocketLike {
@@ -40,6 +42,7 @@ export function createLiveClient(deps: LiveClientDeps) {
   let socket: LiveSocketLike | null = null;
   let patientGuid: string | null = null;
   let chatVisible = false;
+  let role: 'drive' | 'follow' | null = null;
   let attempt = 0;
   let retry: unknown = null;
   let stopped = true;
@@ -79,6 +82,7 @@ export function createLiveClient(deps: LiveClientDeps) {
       attempt = 0;
       if (patientGuid) next.send(JSON.stringify({ type: 'subscribe', patientGuid }));
       if (chatVisible) next.send(JSON.stringify({ type: 'chat-visible', value: true }));
+      if (role) next.send(JSON.stringify({ type: 'role', role }));
     };
     next.onmessage = (event) => {
       let message: LiveMessage;
@@ -102,7 +106,11 @@ export function createLiveClient(deps: LiveClientDeps) {
     start(patient: string) {
       if (!stopped && patient === patientGuid) return;
       patientGuid = patient;
-      if (!stopped && connected) return send({ type: 'subscribe', patientGuid });
+      if (!stopped && connected) {
+        send({ type: 'subscribe', patientGuid });
+        if (role) send({ type: 'role', role });
+        return;
+      }
       stopped = false;
       void connect();
     },
@@ -121,6 +129,11 @@ export function createLiveClient(deps: LiveClientDeps) {
     },
     sendMirror(state: Record<string, unknown>) {
       send({ type: 'mirror', state });
+    },
+    /** Mirror mode: drive or follow; remembered and sent again after reconnecting. */
+    setRole(next: 'drive' | 'follow') {
+      role = next;
+      send({ type: 'role', role });
     },
     onMessage(listener: (message: LiveMessage) => void) {
       listeners.add(listener);
@@ -174,7 +187,8 @@ export function useLiveSync(patientGuid: string | null, refresh: () => Promise<v
     });
     const stopMirror = startMirror({
       sendState: (state) => live.sendMirror(state),
-      onState: (callback) => live.onMessage((message) => message.type === 'mirror' && callback(message.state)),
+      sendRole: (role) => live.setRole(role),
+      onMessage: (callback) => live.onMessage(callback),
     });
     live.start(patientGuid);
     return () => {
