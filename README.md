@@ -18,6 +18,7 @@ See [issue #1](https://github.com/HalsaPlus/Hackathon/issues/1). The whole case 
 | --- | --- | --- |
 | `/app/` | The patient app, a PWA you can install on a phone | The patient |
 | `/` | The admin console: patients, the plan as a horizontal metro map, the PDHC connection and the inbound log | The team |
+| `/phone` | The patient app inside a phone on a Hälsa+ background, for showing MMD full screen on a computer (F: full screen, R: reload the app) | Demos |
 
 In the demo both sit behind the same admin login. A real patient sign-in is a later step.
 

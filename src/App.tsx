@@ -51,6 +51,7 @@ export default function App() {
               Connection
             </a>
             <a href="/app/">Patient app</a>
+            <a href="/phone" target="_blank" rel="noopener">App in a phone</a>
           </nav>
           <form method="post" action="/logout" className="logout">
             <button type="submit">Sign out</button>
